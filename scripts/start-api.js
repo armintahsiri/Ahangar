@@ -11,7 +11,6 @@ const api = spawn(process.execPath, ['server.js'], {
     PORT: process.env.PORT || '3000',
     DATA_DIR: process.env.DATA_DIR || path.join(root, 'data'),
     ORIGIN: process.env.ORIGIN || 'http://localhost:5173',
-    RP_ID: process.env.RP_ID || 'localhost'
   },
   stdio: 'inherit'
 })

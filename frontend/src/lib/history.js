@@ -159,10 +159,14 @@ export function bestWeightFor(S, exId) {
   return best
 }
 export function effectiveRoutineId(S, iso) {
+  const wd = new Date(iso + 'T12:00:00').getDay()
+  const coachWeek = S.coachProgram?.week
+  if (coachWeek && Object.prototype.hasOwnProperty.call(coachWeek, wd)) {
+    return coachWeek[wd] === 'rest' ? null : (coachWeek[wd] || null)
+  }
   const ov = S.dayPlan[iso]
   if (ov === 'rest') return null
   if (ov && S.routines.some(r => r.id === ov)) return ov
-  const wd = new Date(iso + 'T12:00:00').getDay()
   return S.week[wd] || null
 }
 export function effectiveRoutine(S, iso) {

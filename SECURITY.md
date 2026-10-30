@@ -32,7 +32,7 @@ instances. Everything else (a crash you can only trigger on your own box, a scan
 is fine as a normal issue.
 
 Useful in a report: the version or commit, whether you're running the prebuilt images or a
-source build, your `RP_ID`/`ORIGIN` and what sits in front of the app, steps to reproduce, and
+source build, your `ORIGIN` and what sits in front of the app, steps to reproduce, and
 what an attacker gets out of it.
 
 **On response times:** this is a hobby project maintained by one person alongside school. There
@@ -43,7 +43,7 @@ in the thread; there's no objection, and no request to sit on it indefinitely.
 
 ## In scope
 
-- **`api/server.js`** — forging or replaying a session cookie, bypassing passkey verification,
+- **`api/server.js`** — forging or replaying a session cookie, bypassing password authentication,
   reading or writing another user's data through `/api/data`, reaching `/api/admin/*` without
   being an admin, or creating a profile without a valid code while `INVITE_ONLY=1`.
 - **Frontend** — XSS in the React app, or anything that lets a page on another origin read or
@@ -64,8 +64,8 @@ in the thread; there's no objection, and no request to sit on it indefinitely.
 - **Missing security headers** (CSP, HSTS, X-Frame-Options) — `web/nginx.conf` sets none; TLS
   and headers are the reverse proxy's job. A concrete attack that headers would have stopped is
   still worth reporting.
-- Instances served over plain `http://` on a LAN IP. Unsupported: passkeys don't work there and
-  the session cookie isn't marked `Secure`.
+- Interception of credentials or session cookies on plain `http://` connections. Use HTTPS for
+  internet-facing instances; cookies are marked `Secure` when `ORIGIN` uses HTTPS.
 - Scanner output with no working exploit, and `npm audit` findings in build-time
   devDependencies (Vite, Vitest, Capacitor CLI) that never reach a running instance.
 - The GitHub Pages demo build — it has no backend at all, everything stays in that browser.
@@ -77,10 +77,9 @@ Read this before hosting openGym for anyone other than yourself.
 
 ### What it does
 
-- **Passkeys only.** No passwords, no email addresses, no reset flow. Registration and login are
-  verified server-side by `@simplewebauthn/server` against `expectedOrigin: ORIGIN` and
-  `expectedRPID: RP_ID`, and the authenticator's signature counter is stored and updated on every
-  login (`api/server.js:292-318`, `api/server.js:338-358`).
+- **Mobile number and password.** Passwords are stored as salted scrypt hashes. There is no SMS
+  ownership verification or self-service password reset yet. Use HTTPS for internet-facing
+  instances to protect credentials in transit.
 - **Sessions are a signed cookie.** `gymsid` carries `<uid>:<expiry>:<version>` plus an
   HMAC-SHA256 tag over it, compared in constant time (`api/server.js:148-161`). The key is 32
   random bytes generated on first run and written to `./data/secret` with mode `0600`
@@ -90,7 +89,7 @@ Read this before hosting openGym for anyone other than yourself.
   session version, and every authenticated request checks the version in the cookie against the
   one on the user record (`api/server.js:167`, `api/server.js:187-188`), so every cookie ever
   issued for the account — on every device, including a copy someone walked off with — stops
-  verifying at once. Passkeys are untouched; signing back in works immediately.
+  verifying at once. Signing in again requires the account password.
 - **Data is isolated per user by the session's uid.** `GET`/`PUT /api/data` only ever touch
   `state-<uid>.json` for the caller (`api/server.js:375-392`); no route lets a normal user name
   another user.
@@ -99,7 +98,7 @@ Read this before hosting openGym for anyone other than yourself.
 
 ### What it does not do
 
-- **Nothing in `./data` is encrypted.** It holds `db.json` (users, passkey public keys, push
+- **Nothing in `./data` is encrypted.** It holds `db.json` (users, password hashes, push
   subscriptions, invite codes), one `state-<uid>.json` per user with their complete workout
   history and body-weight log, `secret`, and `vapid.json`. Anyone who can read that folder — you,
   whoever holds the backups, whoever gets into the host — can read every user's data, and with
@@ -117,33 +116,20 @@ Read this before hosting openGym for anyone other than yourself.
   `./data/secret` and restarting still works as the instance-wide reset, and disabling an account
   still locks out one user completely.
 - **CSRF protection is `SameSite=Lax` and nothing else.** There are no CSRF tokens.
-- **User verification is preferred, not required.** Both handshakes pass
-  `requireUserVerification: false` (`api/server.js:297`, `api/server.js:343`), so a passkey
-  released without a biometric or PIN is still accepted. In practice: unlocked device ≈ account
-  access.
-- **One passkey per profile, and no recovery.** Every successful registration creates a *new*
-  profile (`api/server.js:309-319`); there is no route to attach a second passkey to an existing
-  one, and no email or reset path. Lose the passkey and that profile is unreachable — only direct
-  surgery on `./data` gets it back.
-- **Disabling someone isn't a ban.** They can still register a fresh profile with a new passkey
+- **No password reset flow yet.** A member who forgets their password needs help from a trusted
+  administrator before they can access the account again.
+- **Disabling someone isn't a ban.** They can still register a fresh profile with another mobile number
   unless `INVITE_ONLY=1` is set.
-- **HTTPS is required and the app doesn't provide it.** The API container speaks plain HTTP and
-  nginx listens on `:80` (`web/nginx.conf`); TLS is your reverse proxy's job. Without it,
-  browsers won't do passkeys at all (except on `http://localhost`) and the session cookie is sent
-  in the clear.
-- **No rate limiting anywhere.** Nothing throttles logins, registrations or writes, and
-  `POST /api/register/options` still answers whether an invite code is valid
-  (`api/server.js:272`), so an invite-only instance on the open internet should have a rate limit
-  in front of it. New invite codes are 16 hex characters — 64 bits (`api/server.js:525`) — which
+- **HTTPS is recommended for public use and the app doesn't provide it.** The API container
+  speaks plain HTTP and nginx listens on `:80` (`web/nginx.conf`); TLS is your reverse proxy's job.
+- **Limited login throttling.** Repeated login failures are throttled in memory per address and
+  mobile number; registration and writes still rely on the reverse proxy for rate limiting.
+  New invite codes are 16 hex characters — 64 bits — which
   makes guessing one impractical even unthrottled; codes generated by earlier versions are 8
   characters / 32 bits and still work, so revoke and reissue any that are still unused. The only
   hard limit
   in the app is a 5 MB request body (`api/server.js:27`).
 - **A few endpoints answer without a session:** `/api/health` (which includes the total user
-  count), `/api/config` (whether invite-only is on), `/api/push/public-key`, and the
-  register/login handshakes.
-- **Changing `RP_ID` invalidates every existing passkey.** They were bound to the old hostname
-  and will fail verification against the new one. The data stays on disk but is unreachable until
-  each user registers again — as a *new* profile. Choose your hostname before anyone registers.
+  count), `/api/config` (whether invite-only is on), `/api/push/public-key`, registration, and login.
 - **Guest mode never reaches the backend.** That data lives unencrypted in the browser's
   `localStorage` and is gone when the browser storage is cleared.

@@ -5,7 +5,15 @@ import { t } from '../lib/i18n.js'
 // GitHub-style activity heatmap, shaded by time trained per day.
 export default function Heatmap({ S, onDay }) {
   const wrapRef = useRef(null)
-  useEffect(() => { if (wrapRef.current) wrapRef.current.scrollLeft = wrapRef.current.scrollWidth }, [])
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    // The page is RTL in Persian. Browsers represent the far end of an RTL
+    // scroller with a negative scrollLeft, so a positive scrollWidth leaves the
+    // mobile heatmap at its oldest (often empty) weeks instead of recent activity.
+    const end = wrap.scrollWidth
+    wrap.scrollLeft = getComputedStyle(wrap).direction === 'rtl' ? -end : end
+  }, [])
 
   const agg = {}
   S.workouts.forEach(w => {

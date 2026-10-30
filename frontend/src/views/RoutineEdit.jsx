@@ -22,6 +22,18 @@ export default function RoutineEdit() {
   const r = S.routines.find(x => x.id === id)
   useEffect(() => { if (!r) nav('/plan') }, [!!r])
   if (!r) return null
+  if (r.coachManaged) return <div className="narrow">
+    <div className="hdr">
+      <button className="iconbtn" onClick={() => nav('/plan')} aria-label={t('Plan')}><Icon name="chevronLeft" /></button>
+      <div style={{ flex: 1, margin: '0 12px' }}><h1 style={{ margin: 0 }}>{r.name}</h1><div className="sub">{t('Assigned by {0}', S.coachProgram?.coach?.name || t('your coach'))}</div></div>
+      <Icon name="lock" />
+    </div>
+    <div className="card small muted">{t('This plan is read-only. Your coach can change the prescription. Log the sets you actually complete during your workout.')}</div>
+    <div className="list">{r.ex.map((e, i) => {
+      const ex = exOr(e.id)
+      return <div className="item" key={i}><Thumb ex={ex} /><div className="grow"><div className="tt capitalize">{ex.n}</div><div className="ss">{exLine(e, S.unit)}</div></div></div>
+    })}</div>
+  </div>
 
   const edit = fn => update(s => { fn(s.routines.find(x => x.id === id).ex) })
   const move = (i, dir) => edit(ex => { const j = i + dir; if (j < 0 || j >= ex.length) return;[ex[i], ex[j]] = [ex[j], ex[i]]; cleanupSg(ex) })

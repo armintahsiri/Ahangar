@@ -1,20 +1,15 @@
-/* opengym-api — passkey (WebAuthn) auth + per-user state storage for openGym
+/* opengym-api — phone/password auth + per-user state storage for openGym
    No framework, JSON-file storage, signed session cookies.               */
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  generateRegistrationOptions, verifyRegistrationResponse,
-  generateAuthenticationOptions, verifyAuthenticationResponse
-} from '@simplewebauthn/server';
 import webpush from 'web-push';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
-const RP_ID = process.env.RP_ID || 'localhost';
 const ORIGIN = process.env.ORIGIN || 'http://localhost:8080';
-const RP_NAME = process.env.RP_NAME || 'openGym';
+const CLUB_NAME = process.env.CLUB_NAME || 'openGym';
 // Admin dashboard (issue): admins are matched by uid; INVITE_ONLY gates new signups behind a
 // code the admin generates. Both default off so a fresh self-hosted instance stays open.
 const ADMIN_UIDS = (process.env.ADMIN_UIDS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -39,14 +34,35 @@ const dbFile = path.join(DATA, 'db.json');
 let db = { users: [], creds: [], subs: [], invites: [] };
 try { db = JSON.parse(fs.readFileSync(dbFile, 'utf8')); } catch {}
 db.subs = db.subs || [];
+// Passkey credentials are no longer accepted or retained by this version.
+const hadPasskeys = (db.creds || []).length > 0;
+db.creds = [];
 db.invites = db.invites || [];
+db.coachLinks = db.coachLinks || [];
+db.coachAssignments = db.coachAssignments || [];
 const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(user.id));
+const isCoach = user => !!user && (user.role === 'coach' || isAdmin(user));
+const publicUser = user => ({ id: user.id, name: user.name, phone: user.phone || null, admin: isAdmin(user), role: isCoach(user) ? 'coach' : 'member' });
+const coachLink = (coachId, memberId) => {
+  const link = db.coachLinks.find(x => x.coachId === coachId && x.memberId === memberId && x.active !== false);
+  const member = db.users.find(u => u.id === memberId);
+  return link && member && !member.disabled ? link : null;
+};
+function assignmentFor(memberId) {
+  const link = db.coachLinks.find(x => x.memberId === memberId && x.active !== false);
+  if (!link) return null;
+  const coach = db.users.find(u => u.id === link.coachId);
+  const plan = db.coachAssignments.find(x => x.memberId === memberId && x.coachId === link.coachId);
+  if (!plan) return null;
+  return { coach: coach ? { id: coach.id, name: coach.name } : null, ...plan };
+}
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2)); }
 function atomicWrite(file, content) {
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }
+if (hadPasskeys) saveDb();
 const stateFile = uid => path.join(DATA, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
 function readState(uid) {
   try { return JSON.parse(fs.readFileSync(stateFile(uid), 'utf8')); } catch { return null; }
@@ -195,25 +211,16 @@ function requireAdmin(req, res) {
   if (!isAdmin(user)) { json(res, 403, { error: 'forbidden' }); return null; }
   return user;
 }
+function requireCoach(req, res) {
+  const user = readSession(req);
+  if (!user) { json(res, 401, { error: 'not signed in' }); return null; }
+  if (!isCoach(user)) { json(res, 403, { error: 'coach access required' }); return null; }
+  return user;
+}
 function sessionCookie(user) {
   return `gymsid=${makeSession(user)}; Path=/; Max-Age=${SESSION_DAYS * 86400}; HttpOnly;${SECURE} SameSite=Lax`;
 }
 const clearCookie = `gymsid=; Path=/; Max-Age=0; HttpOnly;${SECURE} SameSite=Lax`;
-
-/* ---------- challenge store (in-memory, 5 min TTL) ---------- */
-const challenges = new Map(); // cid -> {challenge, name?, uid?, exp}
-function putChallenge(data) {
-  const cid = crypto.randomBytes(16).toString('base64url');
-  challenges.set(cid, { ...data, exp: Date.now() + 5 * 60000 });
-  return cid;
-}
-function takeChallenge(cid) {
-  const c = challenges.get(cid);
-  challenges.delete(cid);
-  if (!c || c.exp < Date.now()) return null;
-  return c;
-}
-setInterval(() => { for (const [k, v] of challenges) if (v.exp < Date.now()) challenges.delete(k); }, 60000).unref();
 
 /* ---------- helpers ---------- */
 function json(res, code, obj, extraHeaders) {
@@ -236,7 +243,31 @@ function readBody(req) {
     req.on('error', reject);
   });
 }
-const b64uToBuf = s => Buffer.from(s, 'base64url');
+function normalizePhone(input) {
+  let phone = String(input || '').trim().replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[\s()-]/g, '');
+  if (phone.startsWith('00')) phone = '+' + phone.slice(2);
+  if (phone.startsWith('09') && /^09\d{9}$/.test(phone)) phone = '+98' + phone.slice(1);
+  if (/^9\d{9}$/.test(phone)) phone = '+98' + phone;
+  return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : null;
+}
+function passwordRecord(password) {
+  const salt = crypto.randomBytes(16);
+  return { salt: salt.toString('base64url'), hash: crypto.scryptSync(password, salt, 64).toString('base64url') };
+}
+function passwordMatches(password, record) {
+  try {
+    const actual = crypto.scryptSync(password, Buffer.from(record.salt, 'base64url'), 64);
+    const expected = Buffer.from(record.hash, 'base64url');
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  } catch { return false; }
+}
+const authAttempts = new Map();
+function blockedAuth(key) {
+  const now = Date.now(), old = authAttempts.get(key);
+  if (!old || now - old.start > 15 * 60_000) { authAttempts.set(key, { start: now, count: 0 }); return false; }
+  return old.count >= 10;
+}
+function failAuth(key) { const a = authAttempts.get(key) || { start: Date.now(), count: 0 }; a.count++; authAttempts.set(key, a); }
 
 /* ---------- live presence (in-memory) ---------- */
 // Clients heartbeat /api/activity while a workout is on screen; the admin dashboard reads who's
@@ -256,114 +287,69 @@ const routes = {
   'GET /api/health': async (req, res) => json(res, 200, { ok: true, users: db.users.length }),
 
   // Public config the login screen needs before anyone is signed in.
-  'GET /api/config': async (req, res) => json(res, 200, { invite_only: INVITE_ONLY }),
+  'GET /api/config': async (req, res) => json(res, 200, { invite_only: INVITE_ONLY, club_name: CLUB_NAME }),
 
   'GET /api/me': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } });
+    json(res, 200, { user: publicUser(user) });
   },
 
-  'POST /api/register/options': async (req, res) => {
+  'POST /api/register': async (req, res) => {
     const body = await readBody(req);
     const name = String(body.name || '').trim().slice(0, 40);
     if (!name) return json(res, 400, { error: 'name required' });
+    const phone = normalizePhone(body.phone), password = String(body.password || '');
+    if (!phone) return json(res, 400, { error: 'enter a valid mobile number, including country code' });
+    if (password.length < 8 || password.length > 200) return json(res, 400, { error: 'password must be at least 8 characters' });
+    if (db.users.some(u => u.phone === phone)) return json(res, 409, { error: 'this mobile number already has an account' });
     const code = String(body.code || '').trim().toUpperCase();
     if (INVITE_ONLY && !db.invites.some(i => i.code === code && !i.usedBy && !i.revoked))
       return json(res, 403, { error: 'a valid invite code is required' });
-    const uid = crypto.randomBytes(12).toString('base64url');
-    const options = await generateRegistrationOptions({
-      rpName: RP_NAME, rpID: RP_ID,
-      userID: Buffer.from(uid), userName: name, userDisplayName: name,
-      attestationType: 'none',
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
-      excludeCredentials: []
-    });
-    const cid = putChallenge({ challenge: options.challenge, name, uid, code });
-    json(res, 200, { cid, options });
-  },
-
-  'POST /api/register/verify': async (req, res) => {
-    const body = await readBody(req);
-    const c = takeChallenge(body.cid);
-    if (!c || !c.uid) return json(res, 400, { error: 'challenge expired — try again' });
-    let verification;
-    try {
-      verification = await verifyRegistrationResponse({
-        response: body.credential,
-        expectedChallenge: c.challenge,
-        expectedOrigin: ORIGIN,
-        expectedRPID: RP_ID,
-        requireUserVerification: false
-      });
-    } catch (e) { return json(res, 400, { error: 'verification failed: ' + e.message }); }
-    if (!verification.verified) return json(res, 400, { error: 'not verified' });
-    const { credential } = verification.registrationInfo;
-    if (db.creds.find(x => x.id === credential.id)) return json(res, 409, { error: 'credential already registered' });
-    // Re-check the invite at the last moment (it may have been used/revoked since options), then burn it.
-    let invite = null;
-    if (INVITE_ONLY) {
-      invite = db.invites.find(i => i.code === c.code && !i.usedBy && !i.revoked);
-      if (!invite) return json(res, 403, { error: 'invite code is no longer valid — ask for a new one' });
+    // Re-check the invite at the last moment, then burn it.
+    let invite = code ? db.invites.find(i => i.code === code && !i.usedBy && !i.revoked) : null;
+    if (INVITE_ONLY && !invite) return json(res, 403, { error: 'invite code is no longer valid — ask for a new one' });
+    const user = { id: crypto.randomBytes(12).toString('base64url'), name, phone, password: passwordRecord(password), created: new Date().toISOString() };
+    if (invite) {
+      user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created;
+      if (invite.coachId && db.users.some(u => u.id === invite.coachId && isCoach(u))) {
+        user.coachId = invite.coachId;
+        db.coachLinks.push({ coachId: invite.coachId, memberId: user.id, active: true, created: user.created });
+      }
     }
-    const user = { id: c.uid, name: c.name, created: new Date().toISOString() };
-    if (invite) { user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created; }
     db.users.push(user);
-    db.creds.push({
-      id: credential.id, userId: user.id,
-      publicKey: Buffer.from(credential.publicKey).toString('base64url'),
-      counter: credential.counter || 0,
-      transports: body.credential?.response?.transports || []
-    });
     saveDb();
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } }, { 'Set-Cookie': sessionCookie(user) });
+    json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
   },
 
-  'POST /api/login/options': async (req, res) => {
-    const options = await generateAuthenticationOptions({
-      rpID: RP_ID, userVerification: 'preferred', allowCredentials: []
-    });
-    const cid = putChallenge({ challenge: options.challenge });
-    json(res, 200, { cid, options });
-  },
-
-  'POST /api/login/verify': async (req, res) => {
+  'POST /api/login': async (req, res) => {
     const body = await readBody(req);
-    const c = takeChallenge(body.cid);
-    if (!c) return json(res, 400, { error: 'challenge expired — try again' });
-    const cred = db.creds.find(x => x.id === body.credential?.id);
-    if (!cred) return json(res, 404, { error: 'unknown passkey — create a profile first' });
-    let verification;
-    try {
-      verification = await verifyAuthenticationResponse({
-        response: body.credential,
-        expectedChallenge: c.challenge,
-        expectedOrigin: ORIGIN,
-        expectedRPID: RP_ID,
-        requireUserVerification: false,
-        credential: {
-          id: cred.id,
-          publicKey: b64uToBuf(cred.publicKey),
-          counter: cred.counter,
-          transports: cred.transports
-        }
-      });
-    } catch (e) { return json(res, 400, { error: 'verification failed: ' + e.message }); }
-    if (!verification.verified) return json(res, 400, { error: 'not verified' });
-    cred.counter = verification.authenticationInfo.newCounter;
-    saveDb();
-    const user = db.users.find(u => u.id === cred.userId);
-    if (!user) return json(res, 500, { error: 'user missing' });
+    const phone = normalizePhone(body.phone), key = `${req.socket.remoteAddress || 'unknown'}:${phone || String(body.phone || '').slice(0, 40)}`;
+    if (blockedAuth(key)) return json(res, 429, { error: 'too many sign-in attempts — try again in 15 minutes' });
+    const user = db.users.find(u => u.phone === phone);
+    if (!user || !user.password || !passwordMatches(String(body.password || ''), user.password)) {
+      failAuth(key); return json(res, 401, { error: 'mobile number or password is incorrect' });
+    }
     if (user.disabled) return json(res, 403, { error: 'this account has been disabled' });
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } }, { 'Set-Cookie': sessionCookie(user) });
+    authAttempts.delete(key);
+    json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
+  },
+
+  // Existing signed-in profiles can attach credentials to the same id, preserving their data.
+  'POST /api/account/credentials': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const body = await readBody(req), phone = normalizePhone(body.phone), password = String(body.password || '');
+    if (!phone) return json(res, 400, { error: 'enter a valid mobile number, including country code' });
+    if (password.length < 8 || password.length > 200) return json(res, 400, { error: 'password must be at least 8 characters' });
+    if (db.users.some(u => u.id !== user.id && u.phone === phone)) return json(res, 409, { error: 'this mobile number already has an account' });
+    user.phone = phone; user.password = passwordRecord(password); saveDb();
+    json(res, 200, { user: publicUser(user) });
   },
 
   'POST /api/logout': async (req, res) => json(res, 200, { ok: true }, { 'Set-Cookie': clearCookie }),
 
-  // "Sign out everywhere" — bumps this user's session version, which invalidates every cookie
-  // ever issued for the account, on every device, including a copy someone else walked off with.
-  // The caller's own cookie is cleared here too, so the browser doing it doesn't sit on a token
-  // it no longer accepts. Passkeys are untouched: signing back in works immediately.
+  // "Sign out everywhere" — bumps this user's session version, invalidating all existing cookies.
   'POST /api/logout/all': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
@@ -377,8 +363,18 @@ const routes = {
     if (!user) return json(res, 401, { error: 'not signed in' });
     try {
       const state = JSON.parse(fs.readFileSync(stateFile(user.id), 'utf8'));
+      const assignment = assignmentFor(user.id);
+      if (assignment) {
+        const assigned = (assignment.routines || []).map(r => ({ ...r, coachManaged: true }));
+        state.routines = [...(state.routines || []).filter(r => !assigned.some(a => a.id === r.id)), ...assigned];
+        state.week = { ...(state.week || {}), ...(assignment.week || {}) };
+        state.coachProgram = { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 };
+      }
       json(res, 200, { state });
-    } catch { json(res, 200, { state: null }); }
+    } catch {
+      const assignment = assignmentFor(user.id);
+      json(res, 200, { state: assignment ? { routines: (assignment.routines || []).map(r => ({ ...r, coachManaged: true })), week: assignment.week || {}, coachProgram: { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 } } : null });
+    }
   },
 
   'PUT /api/data': async (req, res) => {
@@ -387,6 +383,25 @@ const routes = {
     const body = await readBody(req);
     if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
     delete body.state.active;              // in-progress workouts stay device-local
+    delete body.state.coachProgram;        // coach-owned assignment is never accepted from a member client
+    const assignment = assignmentFor(user.id);
+    const assignedIds = new Set((assignment?.routines || []).map(r => r.id));
+    body.state.routines = (body.state.routines || []).filter(r => r && !r.coachManaged && !assignedIds.has(r.id));
+    if (assignment) {
+      const saved = readState(user.id) || {};
+      const savedWeek = saved.week || {};
+      body.state.week = body.state.week || {};
+      for (const day of Object.keys(assignment.week || {})) {
+        if (Object.prototype.hasOwnProperty.call(savedWeek, day)) body.state.week[day] = savedWeek[day];
+        else delete body.state.week[day];
+      }
+      for (const [day, id] of Object.entries(body.state.week)) {
+        if (assignedIds.has(id)) {
+          if (Object.prototype.hasOwnProperty.call(savedWeek, day)) body.state.week[day] = savedWeek[day];
+          else delete body.state.week[day];
+        }
+      }
+    }
     atomicWrite(stateFile(user.id), JSON.stringify(body.state));
     json(res, 200, { ok: true, ts: body.state._ts || null });
   },
@@ -465,7 +480,7 @@ const routes = {
       const last = workouts[workouts.length - 1];
       return {
         id: u.id, name: u.name, created: u.created || null,
-        disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null,
+        disabled: !!u.disabled, admin: isAdmin(u), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null,
         workouts: workouts.length,
         lastWorkout: last ? last.d : null,
         lastSync: S._ts || null,
@@ -484,7 +499,7 @@ const routes = {
     if (!u) return json(res, 404, { error: 'no such user' });
     const S = readState(u.id) || {};
     json(res, 200, {
-      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null },
+      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null },
       unit: S.unit || 'kg',
       lastSync: S._ts || null,
       routines: (S.routines || []).map(r => ({ id: r.id, name: r.name, emoji: r.emoji, count: (r.ex || []).length })),
@@ -505,6 +520,98 @@ const routes = {
     json(res, 200, { ok: true, id: u.id, disabled: u.disabled });
   },
 
+  'POST /api/admin/user/role': async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u) return json(res, 404, { error: 'no such user' });
+    if (isAdmin(u)) return json(res, 400, { error: 'admin role is managed by server configuration' });
+    if (body.role !== 'coach' && body.role !== 'member') return json(res, 400, { error: 'role must be coach or member' });
+    u.role = body.role;
+    if (body.role !== 'coach') {
+      const removed = db.coachLinks.filter(x => x.coachId === u.id).map(x => x.memberId);
+      db.coachLinks = db.coachLinks.filter(x => x.coachId !== u.id);
+      db.coachAssignments = db.coachAssignments.filter(x => x.coachId !== u.id);
+      db.invites = db.invites.filter(x => x.coachId !== u.id);
+      for (const memberId of removed) {
+        const member = db.users.find(x => x.id === memberId);
+        if (member?.coachId === u.id) delete member.coachId;
+      }
+    }
+    saveDb();
+    json(res, 200, { user: publicUser(u) });
+  },
+
+  'GET /api/coach/clients': async (req, res) => {
+    const coach = requireCoach(req, res); if (!coach) return;
+    const links = db.coachLinks.filter(x => x.coachId === coach.id && x.active !== false);
+    const clients = links.map(link => {
+      const u = db.users.find(x => x.id === link.memberId);
+      if (!u || u.disabled) return null;
+      const state = readState(u.id) || {};
+      const workouts = state.workouts || [];
+      return { id: u.id, name: u.name, disabled: !!u.disabled, created: u.created || null,
+        workouts: workouts.length, lastWorkout: workouts.at(-1)?.d || null,
+        assignment: db.coachAssignments.find(x => x.coachId === coach.id && x.memberId === u.id) || null };
+    }).filter(Boolean);
+    json(res, 200, { clients });
+  },
+
+  'POST /api/coach/invites/new': async (req, res) => {
+    const coach = requireCoach(req, res); if (!coach) return;
+    const body = await readBody(req);
+    let code;
+    do { code = crypto.randomBytes(8).toString('hex').toUpperCase(); } while (db.invites.some(i => i.code === code));
+    const invite = { code, note: String(body.note || '').slice(0, 60), coachId: coach.id, createdBy: coach.id, created: new Date().toISOString() };
+    db.invites.push(invite); saveDb();
+    json(res, 200, { invite });
+  },
+
+  'GET /api/coach/client': async (req, res) => {
+    const coach = requireCoach(req, res); if (!coach) return;
+    const id = new URL(req.url, 'http://x').searchParams.get('id');
+    if (!coachLink(coach.id, id)) return json(res, 404, { error: 'client is not linked to this coach' });
+    const u = db.users.find(x => x.id === id);
+    if (!u) return json(res, 404, { error: 'no such user' });
+    const S = readState(id) || {};
+    json(res, 200, { user: { id: u.id, name: u.name, disabled: !!u.disabled, created: u.created || null },
+      workouts: (S.workouts || []).slice().reverse(), assignment: db.coachAssignments.find(x => x.coachId === coach.id && x.memberId === id) || null });
+  },
+
+  'PUT /api/coach/assignment': async (req, res) => {
+    const coach = requireCoach(req, res); if (!coach) return;
+    const body = await readBody(req);
+    const memberId = String(body.memberId || '');
+    if (!coachLink(coach.id, memberId)) return json(res, 404, { error: 'client is not linked to this coach' });
+    if (!Array.isArray(body.routines) || body.routines.length > 40 || !body.week || typeof body.week !== 'object' || Array.isArray(body.week))
+      return json(res, 400, { error: 'routines and weekly schedule required' });
+    const ids = new Set();
+    const routines = [];
+    for (const r of body.routines) {
+      if (!r || typeof r.id !== 'string' || !r.id || typeof r.name !== 'string' || !Array.isArray(r.ex) || r.ex.length > 100)
+        return json(res, 400, { error: 'invalid routine' });
+      if (ids.has(r.id)) return json(res, 400, { error: 'routine ids must be unique' });
+      if (r.ex.some(e => !e || typeof e.id !== 'string')) return json(res, 400, { error: 'invalid exercise in routine' });
+      ids.add(r.id);
+      routines.push({ id: r.id, name: r.name.slice(0, 80), emoji: String(r.emoji || '🏋️').slice(0, 12),
+        prog: r.prog || 'linear', ex: r.ex.map(e => ({ ...e })) });
+    }
+    const week = {};
+    for (const [day, routineId] of Object.entries(body.week)) {
+      if (!/^[0-6]$/.test(day) || (routineId !== 'rest' && !ids.has(routineId))) return json(res, 400, { error: 'invalid weekly schedule' });
+      week[day] = routineId;
+    }
+    const idx = db.coachAssignments.findIndex(x => x.coachId === coach.id && x.memberId === memberId);
+    const previous = idx >= 0 ? db.coachAssignments[idx] : null;
+    if (!routines.length) {
+      if (idx >= 0) db.coachAssignments.splice(idx, 1);
+      saveDb(); json(res, 200, { assignment: null }); return;
+    }
+    const assignment = { coachId: coach.id, memberId, routines, week, version: (previous?.version || 0) + 1, updatedAt: new Date().toISOString() };
+    if (idx >= 0) db.coachAssignments[idx] = assignment; else db.coachAssignments.push(assignment);
+    saveDb(); json(res, 200, { assignment });
+  },
+
   'GET /api/admin/invites': async (req, res) => {
     if (!requireAdmin(req, res)) return;
     // resolve usedBy uid → name for display
@@ -519,8 +626,7 @@ const routes = {
     const body = await readBody(req);
     let code;
     // 16 hex chars = 64 bits, up from 8 chars / 32 bits. The app has no rate limiting by design
-    // (that's the reverse proxy's job) and /api/register/options tells a caller whether a code is
-    // good, so the code itself has to be the thing that isn't worth guessing. Codes already in
+    // (that's the reverse proxy's job), so the code itself has to be the thing that isn't worth guessing. Codes already in
     // db.json keep working — validation is an exact string compare, never a length or format check.
     do { code = crypto.randomBytes(8).toString('hex').toUpperCase(); } while (db.invites.some(i => i.code === code));
     const invite = { code, note: String(body.note || '').slice(0, 60), createdBy: admin.id, created: new Date().toISOString() };
@@ -551,4 +657,4 @@ http.createServer(async (req, res) => {
     console.error(key, e);
     if (!res.headersSent) json(res, 500, { error: 'server error' });
   }
-}).listen(PORT, () => console.log(`gym-api on :${PORT} (rpID=${RP_ID}, origin=${ORIGIN})`));
+}).listen(PORT, () => console.log(`gym-api on :${PORT}`));

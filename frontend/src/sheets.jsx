@@ -47,9 +47,9 @@ export function loadStarterPlan() {
   const [push, pull, legs] = starterRoutines()
   update(st => {
     st.routines.push(push, pull, legs)
-    st.week[1] = push.id; st.week[3] = pull.id; st.week[5] = legs.id
+    st.week[6] = push.id; st.week[1] = pull.id; st.week[3] = legs.id
   })
-  toast(t('Starter plan loaded — Mon Push · Wed Pull · Fri Legs'))
+  toast(t('Starter plan loaded — Sat Push · Mon Pull · Wed Legs'))
 }
 
 /* ============================ weight picker (shared: body weight + goal) ============================ */
@@ -834,7 +834,8 @@ export function beginWorkout(routineId, bw) {
     return { id: cfg.id, sg: cfg.sg, target: { ...cfg }, plan, sets: applyPrescription(buildSets(st, cfg), plan) }
   })
   update(s => {
-    s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }
+    s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0,
+      coachProgramVersion: r?.coachManaged ? (st.coachProgram?.version || 1) : null, entries }
   })
   useUI.getState().stopRest()
   nav('/workout')
@@ -951,7 +952,12 @@ function doFinishWorkout() {
     // `target` (what the session prescribed) is kept alongside the sets: without it a
     // finished workout cannot say whether it hit its reps, and a timed session reads back
     // as "0 reps". It is what the progression engine works from.
-    entries: A.entries.map(e => ({ id: e.id, sets: e.sets, topW: e.topW || null, target: e.target || null })).filter(e => e.sets.some(s => s.done)),
+    // For coach-assigned sessions, retain every prescribed exercise and unchecked set in the
+    // member's report, including exercises they skipped completely. This lets the coach see
+    // partial completion without turning the report into something the coach can edit.
+    entries: A.entries.map(e => ({ id: e.id, sets: e.sets, topW: e.topW || null, target: e.target || null }))
+      .filter(e => A.coachProgramVersion || e.sets.some(s => s.done)),
+    coachProgramVersion: A.coachProgramVersion || null,
     prs
   }
   w.vol = workoutVolume(w)

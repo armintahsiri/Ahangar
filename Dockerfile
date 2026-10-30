@@ -9,10 +9,12 @@
 # module-resolution errors.
 FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
+ARG CLUB_NAME=openGym
+ENV CLUB_NAME=${CLUB_NAME}
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci 2>/dev/null || npm install
 COPY frontend/ ./
-RUN npm run build
+RUN npm run build && node -e 'const fs=require("node:fs"); const name=process.env.CLUB_NAME || "openGym"; const m="/app/dist/manifest.json"; const manifest=JSON.parse(fs.readFileSync(m,"utf8")); manifest.name=name; manifest.short_name=name.slice(0,12); manifest.description=name+" fitness tracker"; fs.writeFileSync(m,JSON.stringify(manifest,null,2)+"\n"); const p="/app/dist/index.html"; const html=fs.readFileSync(p,"utf8").replace("<title>openGym</title>","<title>"+name+"</title>").replace("content=\"openGym\"","content=\""+name+"\""); fs.writeFileSync(p,html);'
 
 FROM nginx:alpine
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf

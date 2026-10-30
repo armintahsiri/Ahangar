@@ -11,6 +11,7 @@ export default function Plan() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
   const update = useStore(s => s.update)
+  const weekOrder = S.lang === 'fa' ? [6, 0, 1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6, 0]
 
   const addRoutine = () => {
     const r = { id: uid(), name: t('New routine'), emoji: DEFAULT_GLYPH, ex: [] }
@@ -23,15 +24,19 @@ export default function Plan() {
       <div><h1>{t('Plan')}</h1><div className="sub">{t('Your weekly routine')}</div></div>
       <button className="iconbtn" onClick={planToolsSheet} aria-label={t('Share your plan')} title={t('Share your plan')}><Icon name="upload" /></button>
     </div>
+    {S.coachProgram && <div className="card" style={{ borderColor: 'var(--acc)' }}>
+      <h2 style={{ marginTop: 0 }}>{t('Coach-assigned plan')}</h2>
+      <div className="muted small">{t('Assigned by {0}. Only your coach can change this plan. You can still log the workout you actually completed.', S.coachProgram.coach?.name || t('your coach'))}</div>
+    </div>}
     <div className="cols"><div>
       <h4 className="sec">{t('Week schedule')}</h4>
       <div className="list" style={{ display: 'flex', flexDirection: 'column' }}>
-        {[1, 2, 3, 4, 5, 6, 0].map(d => {
+        {weekOrder.map(d => {
           const r = S.routines.find(x => x.id === S.week[d])
-          return <div key={d} className="item" onClick={() => dayAssignSheet(d)}>
+          return <div key={d} className="item" onClick={() => !S.coachProgram && dayAssignSheet(d)}>
             <div className="grow"><div className="tt">{t(DAYN[d])}</div></div>
-            {r ? <span className="tag acc"><Icon name={glyphOf(r.emoji)} />{r.name}</span> : <span className="tag">{t('Rest')}</span>}
-            <Icon name="chevronRight" className="chev" /></div>
+            {r ? <span className="tag acc"><Icon name={glyphOf(r.emoji)} />{r.name}{r.coachManaged ? ' · ' + t('Coach') : ''}</span> : <span className="tag">{t('Rest')}</span>}
+            {!S.coachProgram && <Icon name="chevronRight" className="chev" />}</div>
         })}
       </div>
     </div><div>
@@ -41,8 +46,8 @@ export default function Plan() {
       </div>
       {S.routines.length ? <div className="list">{S.routines.map(r => <div key={r.id} className="item" onClick={() => nav('/plan/r/' + r.id)}>
         <span className="lrow-i"><Icon name={glyphOf(r.emoji)} /></span>
-        <div className="grow"><div className="tt">{r.name}</div><div className="ss">{exCount(r.ex.length)}</div></div>
-        <Icon name="chevronRight" className="chev" /></div>)}</div> : <>
+        <div className="grow"><div className="tt">{r.name}{r.coachManaged ? <span className="tag acc" style={{ marginInlineStart: 6 }}>{t('Coach')}</span> : null}</div><div className="ss">{exCount(r.ex.length)}</div></div>
+        {r.coachManaged ? <Icon name="lock" className="chev" /> : <Icon name="chevronRight" className="chev" />}</div>)}</div> : <>
         <div className="empty"><div className="ico"><Icon name="clipboard" /></div>{t('No routines yet.')}<br />{t('Create one or load the starter plan.')}</div>
         <Button icon="sparkles" onClick={loadStarterPlan}>{t('Load starter plan (Push / Pull / Legs)')}</Button>
       </>}

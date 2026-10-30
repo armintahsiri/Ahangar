@@ -7,7 +7,7 @@
 **A self-hosted gym & body-weight tracker you actually own.**
 
 Plan your week, run guided workouts, track every set and your body weight over time —
-on your phone, synced across devices, behind your own passkey login.
+on your phone, synced across devices, with mobile-number and password sign-in.
 No account on someone else's server, no subscription, no ads. Just `docker compose up`.
 
 <br>
@@ -39,7 +39,7 @@ repository. The AI can prepare the deployment while the hosting provider keeps t
 
 > **Important:** for the complete app, choose hosting that supports **Docker and persistent
 > storage**, such as Railway or Render. openGym is not only a static website: its API stores your
-> profile, passkey and workout history. A normal Vercel or Netlify static deployment publishes only
+> profile, password hash and workout history. A normal Vercel or Netlify static deployment publishes only
 > the frontend and is **not a complete installation**. Use those platforms only if an experienced
 > developer or AI first adapts both the API and persistent data storage.
 
@@ -70,7 +70,7 @@ I am not a developer. Please deploy my fork of openGym-fa and guide me one small
 https://github.com/YOUR-NAME/opengym-fa
 
 I want the complete application online, including the frontend, Node API, exercise media,
-passkey login, and permanent workout data. Choose a managed Docker host such as Railway or
+phone/password login, and permanent workout data. Choose a managed Docker host such as Railway or
 Render. I do not own a server. Before choosing a paid plan, tell me the current cost and ask me.
 
 Requirements:
@@ -78,10 +78,10 @@ Requirements:
 2. Do not make a frontend-only Vercel or Netlify deployment. If I insist on either platform,
    explain that the API and persistent storage must be migrated and verify the complete result.
 3. Create or repair the deployment configuration needed by the chosen host.
-4. Attach persistent storage and make the API use it for /data. My profiles, passkeys and workout
+4. Attach persistent storage and make the API use it for /data. My profiles and workout
    history must survive a restart and redeployment.
-5. Use the final HTTPS hostname for RP_ID (hostname only) and ORIGIN (complete https:// URL).
-6. Never commit or reveal .env files, session secrets, passkeys, cookies, data/db.json, or backups.
+5. Use the final HTTPS address for ORIGIN.
+6. Never commit or reveal .env files, session secrets, cookies, data/db.json, or backups.
 7. Enable automatic deployment from my fork, but ask before changing billing, domains or access.
 8. Verify the public homepage returns HTTP 200 and /api/health returns JSON containing ok: true.
 9. Restart or redeploy once and verify that a test profile/data still exists afterward.
@@ -89,7 +89,7 @@ Requirements:
     how to install the website on my phone, how to back up /data, and how future GitHub changes
     are deployed.
 
-Do not say it is finished until the frontend, API, HTTPS passkey flow, media and persistent data
+Do not say it is finished until the frontend, API, HTTPS login, media and persistent data
 have all been checked. If you need me to click something, give the exact button name and its
 location on the current screen.
 ```
@@ -99,8 +99,7 @@ location on the current screen.
 When the AI gives you the final `https://...` address:
 
 1. Open it and choose **Create profile**.
-2. Follow the browser prompt to create a **passkey** with Face ID, fingerprint, Windows Hello or
-   your device PIN. The passkey replaces a traditional password.
+2. Create an account with your mobile number and a password of at least 8 characters.
 3. For Persian, open **Settings → General → Language → فارسی**.
 4. Open **Plan**, create a routine and assign it to weekdays.
 5. Press the center **Start** button on a workout day.
@@ -118,7 +117,7 @@ your own profile first and then enable invite-only access if the site should be 
   repository in your preferred AI coding tool.
 - Ask the AI for the change you want, review it, and let it **commit and push to your fork**.
 - If automatic deployment is connected, the hosting provider will rebuild the site after the push.
-- Never upload `.env`, `data/`, exported backups, passkeys or secret values to GitHub.
+- Never upload `.env`, `data/`, exported backups or secret values to GitHub.
 
 If you only want to try the app on one computer and do not need a public website, skip cloud
 hosting and follow [Quick start (self-host)](#quick-start-self-host) below.
@@ -147,7 +146,7 @@ The complete Persian/English source, setup guides, releases and issue tracker li
 Most workout apps lock your data behind a login on their servers, nag you to upgrade, or
 disappear when the startup does. openGym is the opposite: **it runs on your box, your data
 stays in a folder you control, and it's yours to fork.** It still feels modern — installable
-as a home-screen app, passkey sign-in, offline support, sync across your phone and laptop.
+as a home-screen app, password sign-in, offline support, sync across your phone and laptop.
 
 ## Features
 
@@ -170,7 +169,7 @@ as a home-screen app, passkey sign-in, offline support, sync across your phone a
 - 🟩 **Activity heatmap** — a GitHub-style year view, shaded by time spent training
 - 💪 **Muscle map** — a front-and-back body diagram shaded by how much work each muscle got, over a week, a month or all time. It names the muscles you *haven't* trained in that period, previews what a routine hits while you build it, and shows what you just trained when you finish. Male or female figure, your pick
 - 🔔 **Push notifications** — rest-timer alerts even with the app closed, plus an optional reminder on days you have a workout planned but haven't logged one. Opt in per profile; keys are generated on first run, nothing to configure
-- 🔑 **Passkeys, not passwords** — Face ID / Touch ID / fingerprint login; each profile keeps its own data, synced across devices
+- 📱 **Mobile number and password sign-in** — each profile keeps its own data, synced across devices
 - 🛠️ **Admin dashboard** (optional) — for whoever runs the instance: who's training right now, per-user history, disable accounts, and invite-only signup. Off by default, so a fresh instance stays open with no admin
 - 🎨 **Designed, not assembled** — light/dark themes and 8 accent colors saved to your profile, over a hand-drawn icon set instead of emoji, so it looks the same on every phone
 - 🌍 **13 languages** — full UI translation (EN, DE, ES, FR, IT, PT, PL, TR, RU, ZH, KO, HI, FA); exercise instructions localized in 10 of them, loaded on demand so the app stays fast
@@ -195,7 +194,7 @@ Open **http://localhost:8080**, tap **Create profile**, and you're in. First lau
 the exercise media (~140 MB) once. Docker builds this fork from source, including the Persian UI;
 you don't need Node installed for this method.
 
-> Want it reachable from your phone over the internet with passkeys? You'll need an HTTPS
+> Want it reachable from your phone over the internet? You'll need an HTTPS
 > domain — a two-line change in `.env`. See **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)**.
 
 ## Local development (npm)
@@ -212,7 +211,7 @@ exercise-media server together. Local API data is stored in `./data`.
 
 ## How to use the website
 
-1. Open the website and choose **Create profile** for passkey-backed sync, or **Continue without account** for browser-only guest mode.
+1. Open the website and choose **Create profile** for account sync, or **Continue without account** for browser-only guest mode.
 2. To use Persian, open **Settings → General → Language → فارسی**. The interface switches to RTL immediately.
 3. Open **Plan**, create a routine, add exercises, and assign routines to weekdays. You can also load the starter Push/Pull/Legs plan.
 4. On a training day, press the center **Start** button. Enter your body weight, complete each set, and use the rest timer between sets.
@@ -227,7 +226,7 @@ openGym is a PWA. Open the deployed HTTPS website, then:
 - **iPhone/iPad/Safari:** **Share → Add to Home Screen**.
 - **Desktop Chrome/Edge:** use the install icon in the address bar.
 
-Passkeys and notifications work on `http://localhost` or an HTTPS domain. A plain LAN address such as `http://192.168.x.x` can only use guest mode because browsers reject WebAuthn there.
+For secure sign-in over the internet, use an HTTPS domain. Plain HTTP on a trusted local network can be used for testing; guest mode stores data only in that browser.
 
 ## AI-assisted setup prompt
 
@@ -251,7 +250,7 @@ First ask me:
 Recommended normal installation:
 1. Clone https://github.com/Jenesyx/opengym-fa.git and enter opengym-fa.
 2. Copy .env.example to .env using the correct command for my OS.
-3. For localhost keep RP_ID=localhost and ORIGIN=http://localhost:8080.
+3. For localhost keep ORIGIN=http://localhost:8080.
 4. Run docker compose up -d --build.
 5. Check docker compose ps, inspect failing service logs, and verify:
    - the website returns HTTP 200 at http://localhost:8080
@@ -260,17 +259,17 @@ Recommended normal installation:
 
 For local code development instead, verify Node.js 20.19+ or 22.12+, then run npm install and npm run dev from the repository root. Read the printed frontend URL; the launcher selects a free API port automatically.
 
-For a public deployment, require HTTPS. Set RP_ID to the hostname only (for example gym.example.com) and ORIGIN to the exact full URL (for example https://gym.example.com). Explain that changing RP_ID later invalidates existing passkeys. Help configure my chosen Cloudflare Tunnel, Caddy, Traefik, nginx, or Nginx Proxy Manager without exposing secrets.
+For a public deployment, require HTTPS. Set ORIGIN to the exact full URL (for example https://gym.example.com). Help configure my chosen Cloudflare Tunnel, Caddy, Traefik, nginx, or Nginx Proxy Manager without exposing secrets.
 
 Safety and verification rules:
-- Never print or upload .env, data/secret, data/db.json, passkeys, cookies, or private keys.
+- Never print or upload .env, data/secret, data/db.json, cookies, or private keys.
 - Ask before installing system software, changing DNS/firewall rules, deleting data, or replacing configuration.
 - Preserve ./data; explain how to back it up before updates or risky changes.
 - Diagnose the actual error output and environment instead of guessing.
 - If a command fails, give me one next command at a time and explain exactly what result to return.
 
 After setup, guide me through:
-- creating a passkey profile or using guest mode;
+- creating a phone/password profile or using guest mode;
 - selecting فارسی from Settings → General → Language;
 - creating routines and assigning the weekly plan;
 - starting and completing a workout;
@@ -302,21 +301,20 @@ mobile app is the install-and-done flavor.
                        └──────────────────────────────┘│
                                                         ▼
                                         ┌──────────────────────────┐
-                                        │  api  (Node + WebAuthn)  │
+                                        │  api  (Node + scrypt auth)│
                                         │   └─ ./data (JSON files) │
                                         └──────────────────────────┘
 ```
 
 - **frontend/** — React + Vite (React Router + Zustand), built to static files **inside Docker**
-- **api/** — Node with no framework, one dependency (`@simplewebauthn/server`), storing everything as plain JSON files under `./data`
-- **web/** — a multi-stage image that builds the frontend and serves it with nginx, proxying `/api` to the backend so it's all on **one origin** (passkeys require this)
+- **api/** — Node with no framework, storing data and scrypt password hashes as JSON files under `./data`
+- **web/** — a multi-stage image that builds the frontend and serves it with nginx, proxying `/api` to the backend
 
 ## Your data
 
-Lives in `./data` on your host: `db.json` (profiles + public passkeys), `state-<user>.json`
+Lives in `./data` on your host: `db.json` (profiles + password hashes), `state-<user>.json`
 (each user's plan, workouts, body weight, settings), and `secret` (the session-cookie key).
-**Back up `./data` and you've backed up everything.** Passkey private keys never touch the
-server — they stay in your phone's secure hardware / your password manager.
+**Back up `./data` and you've backed up everything.** Passwords are stored as one-way hashes.
 
 ## Configuration
 
@@ -324,10 +322,8 @@ All via `.env` (see `.env.example`):
 
 | Variable      | What it is                                           | Default                 |
 |---------------|------------------------------------------------------|-------------------------|
-| `RP_ID`       | Hostname passkeys are bound to                       | `localhost`             |
 | `ORIGIN`      | Full URL the app is served from                      | `http://localhost:8080` |
 | `WEB_PORT`    | Host port for the web UI                             | `8080`                  |
-| `RP_NAME`     | Name shown in the passkey prompt                     | `openGym`               |
 | `ADMIN_UIDS`  | User ids that get the admin dashboard (comma-separated) | *(none)*             |
 | `INVITE_ONLY` | Require an invite code to create a profile           | *(off)*                 |
 
@@ -351,7 +347,7 @@ Rough, community-driven — ideas and PRs welcome:
 ## Tech
 
 React 19 + Vite (React Router, Zustand) · Node (no framework) · nginx · Docker Compose ·
-WebAuthn · exercise data from [hasaneyldrm/exercises-dataset](https://github.com/hasaneyldrm/exercises-dataset).
+Phone/password sessions · exercise data from [hasaneyldrm/exercises-dataset](https://github.com/hasaneyldrm/exercises-dataset).
 No database server, no cloud dependencies — the frontend builds inside Docker, so self-hosting
 stays a one-command `docker compose up`.
 
@@ -363,8 +359,7 @@ React, the router and Zustand.
 ## Community
 
 - **[Q&A](https://github.com/Jenesyx/opengym-fa/discussions/categories/q-a)** — self-hosting
-  help, passkey/login trouble, "how do I…". Most login problems turn out to be an `RP_ID`/`ORIGIN`
-  mismatch.
+  help, login trouble, "how do I…". For public deployments, check the HTTPS address and `ORIGIN`.
 - **[Ideas](https://github.com/Jenesyx/opengym-fa/discussions/categories/ideas)** — features
   worth talking through before anyone writes code.
 - **[Show and tell](https://github.com/Jenesyx/opengym-fa/discussions/categories/show-and-tell)**

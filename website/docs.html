@@ -65,7 +65,7 @@
   <ul>
     <li><b>Self-host + home screen (recommended):</b> open your own openGym instance in
         Safari → <b>Share</b> → <b>Add to Home Screen</b>. You get a full-screen app with its
-        own icon, passkey sign-in and sync — no expiry, no fees.</li>
+        own icon, account sign-in and sync — no expiry, no fees.</li>
     <li><b>Build it onto your own iPhone:</b> with a Mac and Xcode, the native app runs on
         your device with a free Apple ID (Apple expires the signature after 7 days; re-run
         from Xcode to renew). See
@@ -75,7 +75,7 @@
   </ul>
 
   <h2 id="selfhost">Self-host with Docker</h2>
-  <p>The self-hosted flavor adds passkey profiles, sync across devices, and (optionally) an
+  <p>The self-hosted flavor adds mobile-number and password profiles, sync across devices, and (optionally) an
      admin dashboard. You need <a href="https://docs.docker.com/get-docker/" rel="noopener">Docker</a>
      with Compose:</p>
   <pre><code>git clone https://github.com/Jenesyx/opengym-fa.git
@@ -84,7 +84,7 @@ cp .env.example .env
 docker compose up -d --build</code></pre>
   <p>Open <code>http://localhost:8080</code>, tap <b>Create profile</b>, and you're in. The
      first launch downloads the exercise media (~140&nbsp;MB) once.</p>
-  <div class="note">Want it reachable from your phone with passkeys? You'll need an HTTPS
+  <div class="note">Want it reachable from your phone over the internet? Use an HTTPS
     domain — a two-line change in <code>.env</code>. The full guide, including reverse-proxy
     examples and the invite-only/admin options, is in
     <a href="https://github.com/Jenesyx/opengym-fa/blob/master/docs/SELF_HOSTING.md" rel="noopener">docs/SELF_HOSTING.md</a>.</div>

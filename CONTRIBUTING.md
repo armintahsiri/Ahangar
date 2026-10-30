@@ -8,7 +8,7 @@ to keep it that way — easy to read, easy to self-host.
 ```
 frontend/  React + Vite app (src/views, src/components, src/store, src/lib). Builds to static files.
            android/ + ios/ are the Capacitor shells for the standalone mobile app (docs/MOBILE.md).
-api/       backend — server.js (Node, no framework), one dependency (@simplewebauthn/server).
+api/       backend — server.js (Node, no framework), web-push for notifications.
 web/       multi-stage Dockerfile (builds frontend → nginx) + nginx.conf (serves app, proxies /api).
 media/     exercise img/gif (gitignored, fetched at runtime).
 docs/      self-hosting guide.
@@ -28,8 +28,7 @@ cd frontend && npm test
 ## Guidelines
 
 - **Keep it dependency-light.** The frontend uses React + Router + Zustand and nothing else;
-  new deps (front or back) are a hard sell. `api/` has two (`@simplewebauthn/server` for passkeys,
-  `web-push` for notifications) — keep it near that.
+  new deps (front or back) are a hard sell. `api/` has one (`web-push` for notifications) — keep it near that.
 - **Match the style.** Small components, clear names, comments only where the "why" isn't obvious.
   State lives in the Zustand store (`src/store`); pure helpers in `src/lib`.
 - **Don't commit** the exercise media (`media/`) or `data/` — they're gitignored.
@@ -57,13 +56,11 @@ cd frontend && npm test
 | A reproducible bug | [Issues](https://github.com/Jenesyx/opengym-fa/issues) |
 | A change you've already built | A pull request |
 
-An answered question in Q&A is worth more than the same answer buried in a closed issue — the
-next person searching "passkey login fails behind my reverse proxy" actually finds it.
+An answered question in Q&A is worth more than the same answer buried in a closed issue.
 
 ## Reporting bugs
 
 Open an issue with: what you did, what you expected, what happened, and your browser/OS. If it's
-about login/passkeys, include your `RP_ID`/`ORIGIN` (not the `data/` contents) — most login
-issues are an origin mismatch.
+about login, include the URL you use and `ORIGIN` (not the `data/` contents).
 
 By contributing you agree your work is licensed under the project's [GNU AGPL v3.0](LICENSE).

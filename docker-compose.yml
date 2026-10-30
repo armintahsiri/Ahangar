@@ -11,7 +11,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        if [ -z "$$(ls -A /out/img 2>/dev/null)" ]; then
+        if [ -z "$$(find /out/img -maxdepth 1 -type f -name '*.jpg' -print -quit 2>/dev/null)" ]; then
           echo "↓ Downloading exercise media (~140 MB, one time)…"
           git clone --depth 1 https://github.com/hasaneyldrm/exercises-dataset /tmp/ds
           cp /tmp/ds/images/*.jpg /out/img/ && cp /tmp/ds/videos/*.gif /out/gif/
@@ -21,7 +21,7 @@ services:
         fi
     restart: "no"
 
-  # Passkey auth + per-user data (Node, no framework).
+  # Phone/password auth + per-user data (Node, no framework).
   # The image can be pulled upstream, but this fork is built from source to include its UI changes.
   api:
     image: ghcr.io/jenesyx/opengym-fa-api:latest
@@ -32,15 +32,17 @@ services:
       - PORT=3000            # internal port (nginx proxies here) — do not change
       - DATA_DIR=/data
     volumes:
-      - ./data:/data         # users, passkeys, per-user state, session secret — BACK THIS UP
+      - ./data:/data         # accounts, per-user state, session secret — BACK THIS UP
 
   # Builds the React frontend (multi-stage) and serves it, proxying /api → api
-  # and the exercise media from the shared volume. Single origin for passkeys.
+  # and the exercise media from the shared volume.
   web:
     image: ghcr.io/jenesyx/opengym-fa-web:latest
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        CLUB_NAME: ${CLUB_NAME:-openGym}
     restart: unless-stopped
     depends_on:
       media:

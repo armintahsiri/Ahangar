@@ -29,6 +29,50 @@ function loadState() {
 
 const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
 
+// Older sample-data versions forced a workout onto today's rest day. Remove that
+// one generated override from existing sample profiles once, while preserving any
+// other day changes the user may have made.
+function clearLegacySampleReschedule(state) {
+  if (!state || state.sampleSeedVersion || state.targetW !== 77 || state.effort !== 'rir') return false
+  const routines = state.routines || []
+  const push = routines.find(r => r.name === 'Push Day')
+  const pull = routines.find(r => r.name === 'Pull Day')
+  const legs = routines.find(r => r.name === 'Leg Day')
+  const workouts = state.workouts || []
+  const bodyweight = state.bodyweight || []
+  const overrides = Object.keys(state.dayPlan || {})
+  if (!push || !pull || !legs || workouts.length < 20 || bodyweight.length < 15 || overrides.length !== 1) return false
+
+  const [iso] = overrides
+  const day = new Date(iso + 'T12:00:00').getDay()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || state.week?.[day] || workouts.some(w => w.d === iso)) return false
+
+  // This is the exact fallback the old seed used: rotate from the latest
+  // Push/Pull/Leg session and assign it only to the current unplanned day.
+  const lastName = workouts[workouts.length - 1]?.name
+  const order = [push, pull, legs]
+  const lastIndex = order.findIndex(r => r.name === lastName)
+  const expected = order[(lastIndex + 1) % order.length]
+  if (lastIndex < 0 || state.dayPlan[iso] !== expected.id) return false
+  delete state.dayPlan[iso]
+  return true
+}
+
+// The assignment comes from the coach-owned server record, never from the member's saved
+// profile. Re-apply it even when the member's local workout history is newer than the server.
+function withCoachProgram(base, remote) {
+  const next = clone(base)
+  const oldIds = new Set((next.routines || []).filter(r => r.coachManaged).map(r => r.id))
+  const assigned = (remote?.routines || []).filter(r => r.coachManaged)
+  next.routines = [...(next.routines || []).filter(r => !r.coachManaged), ...assigned]
+  const week = { ...(next.week || {}) }
+  for (const [day, id] of Object.entries(week)) if (oldIds.has(id)) delete week[day]
+  Object.assign(week, remote?.coachProgram?.week || {})
+  next.week = week
+  next.coachProgram = remote?.coachProgram || null
+  return next
+}
+
 export const useStore = create((set, get) => {
   let pushTm = null
   let saveTm = null
@@ -82,6 +126,7 @@ export const useStore = create((set, get) => {
   return {
     S: (() => { const s = loadState(); registerCustom(s.customEx); return s })(),
     user: (() => { try { return JSON.parse(localStorage.getItem('gym_user')) || null } catch { return null } })(),
+    clubName: 'openGym',
     ready: false,
 
     // Mutate a draft of S via producer fn, then persist + schedule sync.
@@ -114,10 +159,15 @@ export const useStore = create((set, get) => {
         const dirty = localStorage.getItem('gym_dirty') === '1'
         if (state && (!hasData(S) || ((state._ts || 0) >= (S._ts || 0) && !dirty))) {
           const active = S.active
-          const next = Object.assign(clone(DEF), state)
+          const next = withCoachProgram(Object.assign(clone(DEF), state), state)
           if (active) next.active = active
           persist(next, false)
-        } else if (hasData(S)) { await get().pushState() }
+        } else if (hasData(S)) {
+          persist(withCoachProgram(S, state), false)
+          await get().pushState()
+        } else {
+          persist(withCoachProgram(S, state), false)
+        }
       } catch (e) { /* offline — keep local */ }
     },
 
@@ -143,6 +193,17 @@ export const useStore = create((set, get) => {
       const { buildDemoState } = await import('../lib/demoSeed.js')
       localStorage.removeItem('gym_dirty')
       persist(Object.assign(clone(DEF), buildDemoState()), false)
+    },
+
+    // Load a realistic example training history into a self-hosted profile on request.
+    async loadSampleData() {
+      const { buildDemoState } = await import('../lib/demoSeed.js')
+      const current = get().S
+      const preferences = {
+        lang: current.lang, unit: current.unit, theme: current.theme,
+        accent: current.accent, sound: current.sound, keepAwake: current.keepAwake
+      }
+      persist(Object.assign(clone(DEF), buildDemoState(), preferences), true)
     },
 
     // Boot: ask the server who we are, then pull.
@@ -173,6 +234,10 @@ export const useStore = create((set, get) => {
         return
       }
       try {
+        const config = await api('/api/config')
+        set({ clubName: config.club_name || 'openGym' })
+      } catch (e) { /* keep the default brand while the server is unavailable */ }
+      try {
         const me = await api('/api/me')
         get().setUser(me.user)
         await get().pullState()
@@ -185,6 +250,8 @@ export const useStore = create((set, get) => {
       } catch (e) {
         if (e.status === 401) get().setUser(null)
       }
+      const current = clone(get().S)
+      if (clearLegacySampleReschedule(current)) get().replaceState(current, true)
       set({ ready: true })
     }
   }

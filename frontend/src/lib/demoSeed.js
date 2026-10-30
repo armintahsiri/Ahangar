@@ -56,13 +56,13 @@ const at = (date, h, m) => { const d = new Date(date); d.setHours(h, m, 0, 0); r
 // straddle two points and average itself away in both.
 const monday = date => { const d = new Date(date); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); d.setHours(12, 0, 0, 0); return +d }
 
-// A full example profile: 12 weeks of Mon/Wed/Fri sessions on the starter plan, with linear
+// A full example profile: 12 weeks of Sat/Mon/Wed sessions on the starter plan, with linear
 // progression, the odd missed session, twice-weekly weigh-ins trending toward the goal, and
 // per-set effort ratings on most (not all) of it.
 export function buildDemoState() {
   const rnd = rng(20260723)
   const [push, pull, legs] = starterRoutines()
-  const byWeekday = { 1: push, 3: pull, 5: legs }
+  const byWeekday = { 6: push, 1: pull, 3: legs }
 
   const nowH = new Date().getHours()
   const today = new Date(); today.setHours(12, 0, 0, 0)
@@ -138,20 +138,12 @@ export function buildDemoState() {
     workouts.push(w)
   }
 
-  // A visitor should always have something to press "Start" on, so if they land on a rest day
-  // the next routine in the rotation is moved onto today — which also shows off rescheduling.
-  const dayPlan = {}
-  const tIso = isoOf(today)
-  if (!byWeekday[today.getDay()] && !workouts.some(w => w.d === tIso)) {
-    const order = [push, pull, legs]
-    const lastName = workouts.length ? workouts[workouts.length - 1].name : legs.name
-    dayPlan[tIso] = order[(order.findIndex(r => r.name === lastName) + 1) % order.length].id
-  }
-
   return {
+    sampleSeedVersion: 2,
     routines: [push, pull, legs],
-    week: { 1: push.id, 3: pull.id, 5: legs.id },
-    dayPlan,
+    week: { 6: push.id, 1: pull.id, 3: legs.id },
+    // Keep rest days as rest days; the demo shouldn't silently override today's schedule.
+    dayPlan: {},
     workouts, bodyweight, exWeights,
     targetW: TARGET_W,
     // The history is rated, so the demo turns the column on and the stats get a scale to

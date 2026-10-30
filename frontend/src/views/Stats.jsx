@@ -48,7 +48,7 @@ function MuscleBalance({ S }) {
         onClick={() => { setHard(h => !h); setSel(null) }}>{on ? t('Hard') : t('All')}</Button>}
     </div>
     <Segmented className="seg-range" value={win} onChange={v => { setWin(v); setSel(null) }}
-      options={[{ value: 7, label: t('Week') }, { value: 30, label: '30d' }, { value: 90, label: '90d' }, { value: 0, label: t('All') }]} />
+      options={[{ value: 7, label: t('Week') }, { value: 30, label: t('30 days') }, { value: 90, label: t('90 days') }, { value: 0, label: t('All') }]} />
     {inWin.length ? <>
       <BodyMap className="tappable" load={load} body={S.body} selected={sel}
         onMuscle={m => setSel(s => (s === m ? null : m))} />
@@ -96,7 +96,7 @@ function EffortCard({ S }) {
   return <div className="card">
     <h2>{t('Effort')} <span className="dim" style={{ textTransform: 'none', letterSpacing: 0 }}>· {t('how close to failure')}</span></h2>
     <Segmented className="seg-range" value={win} onChange={setWin}
-      options={[{ value: 30, label: '30d' }, { value: 90, label: '90d' }, { value: 365, label: '1Y' }, { value: 0, label: t('All') }]} />
+      options={[{ value: 30, label: t('30 days') }, { value: 90, label: t('90 days') }, { value: 365, label: t('1 year') }, { value: 0, label: t('All') }]} />
     {sum.rated === 0 ? <div className="muted small">{t('No rated sets in this period.')}</div> : <>
       <div className="row between" style={{ alignItems: 'flex-end', gap: 12 }}>
         <div>
@@ -223,7 +223,7 @@ export default function Stats() {
           </div>
         </div>
         <Segmented className="seg-range" value={range} onChange={setRange}
-          options={[{ value: 30, label: '1M' }, { value: 90, label: '3M' }, { value: 365, label: '1Y' }, { value: 0, label: t('All') }]} />
+          options={[{ value: 30, label: t('1 month') }, { value: 90, label: t('3 months') }, { value: 365, label: t('1 year') }, { value: 0, label: t('All') }]} />
         <div className="chart"><LineChart points={bwPts} h={160} unit={S.unit} goal={S.targetW} /></div>
       </div>
 

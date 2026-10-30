@@ -9,7 +9,6 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^13.1.1",
     "web-push": "^3.6.7"
   }
 }
