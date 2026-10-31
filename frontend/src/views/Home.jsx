@@ -35,7 +35,9 @@ export default function Home() {
     const iso = isoOf(d)
     const eff = effectiveRoutineId(S, iso), ovr = S.dayPlan[iso] !== undefined, done = doneDays.has(iso)
     const dot = done ? ' done' : ovr && eff ? ' ovr' : eff ? ' plan' : ''
-    strip.push(<div key={i} className={'wday' + (iso === todayISO() ? ' today' : '')} onClick={() => dayOverrideSheet(iso)}>
+    // With a coach program the weekly plan is coach-owned — the week strip stays read-only,
+    // since any dayPlan override would be silently ignored by effectiveRoutineId anyway.
+    strip.push(<div key={i} className={'wday' + (iso === todayISO() ? ' today' : '')} onClick={() => !S.coachProgram && dayOverrideSheet(iso)}>
       <div className="lbl">{t(DAYS[d.getDay()])}</div><div className="num">{d.getDate()}</div><div className={'dot' + dot} /></div>)
   }
   const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6)

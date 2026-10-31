@@ -96,6 +96,15 @@ out and locked out everywhere until you re-enable it), and — with `INVITE_ONLY
 revoking invite codes. Existing accounts keep working when you switch invite-only on. Admin access
 is gated by your account session and enforced server-side, so it needs no separate login.
 
+The instance has three roles. The **gym owner** (admin) promotes members to **coach** from the
+user detail sheet, and assigns each member to a coach the same way — one coach per member, and
+re-assigning drops whatever the previous coach had assigned. A **coach** gets a Coach dashboard:
+they pick one of their own routines as a template and assign a separate snapshot of it to each of
+their athletes, day by day; they can also read each athlete's workout reports. The **athlete**
+sees the assigned plan read-only on the Plan tab and logs the sets they actually complete — their
+coach sees the report either way. Demoting a coach unlinks their athletes and deletes their
+assignments.
+
 Prefer to keep the whole thing off the open internet? A VPN or an auth proxy (Authelia, Cloudflare
 Access…) in front still works, and composes with the above.
 

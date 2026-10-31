@@ -23,16 +23,39 @@ const rel = ts => {
 }
 const dur = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h' + (m % 60) + 'm' }
 
-function UserDetail({ id, onChanged, close }) {
+function UserDetail({ id, users, meId, onChanged, close }) {
   const [d, setD] = useState(null)
   const toast = useUI(s => s.toast)
-  useEffect(() => { api('/api/admin/user?id=' + encodeURIComponent(id)).then(setD).catch(e => toast(e.message)) }, [id])
+  const openSheet = useUI(s => s.openSheet)
+  const load = () => api('/api/admin/user?id=' + encodeURIComponent(id)).then(setD).catch(e => toast(e.message))
+  useEffect(() => { load() }, [id])
   if (!d) return <div className="muted small">Loading…</div>
   const u = d.user
   const setDisabled = disabled => {
     api('/api/admin/user/disable', { method: 'POST', body: JSON.stringify({ id: u.id, disabled }) })
       .then(() => { toast(disabled ? 'User disabled' : 'User enabled'); onChanged(); close() })
       .catch(e => toast(e.message))
+  }
+  const setAdmin = flag => {
+    api('/api/admin/user/admin', { method: 'POST', body: JSON.stringify({ id: u.id, admin: flag }) })
+      .then(() => { toast(flag ? u.name + ' is now an admin' : 'Admin access removed'); onChanged(); close() })
+      .catch(e => toast(e.message))
+  }
+  const setCoach = (coachId, pickerClose) => {
+    api('/api/admin/user/coach', { method: 'POST', body: JSON.stringify({ id: u.id, coachId }) })
+      .then(r => { toast(r.coach ? 'Assigned to ' + r.coach.name : 'Coach removed'); pickerClose?.(); load(); onChanged() })
+      .catch(e => toast(e.message))
+  }
+  const pickCoach = () => {
+    const coaches = (users || []).filter(x => x.role === 'coach' && !x.disabled && x.id !== u.id)
+    openSheet(pclose => <div style={{ padding: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Assign coach to {u.name}</h3>
+      {coaches.length ? <div className="list">{coaches.map(c => <button key={c.id} className="lrow tap" onClick={() => setCoach(c.id, pclose)}>
+        <span className="lrow-m"><span className="lrow-t">{c.name}</span></span>
+        {u.coach?.id === c.id && <Icon name="check" className="lrow-k" />}
+      </button>)}</div>
+        : <div className="empty small">No coaches yet — promote a member to coach first.</div>}
+    </div>)
   }
   return <>
     <h3 className="capitalize">{u.name}</h3>
@@ -49,12 +72,26 @@ function UserDetail({ id, onChanged, close }) {
       <div className="tile"><div className="l">Routines</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.routines.length}</div></div>
       <div className="tile"><div className="l">Last sync</div><div className="v" style={{ fontSize: '.95rem' }}>{rel(d.lastSync)}</div></div>
     </div>
+    {!u.admin && u.role !== 'coach' && <div className="row between" style={{ margin: '10px 0 4px', padding: '9px 2px', borderBottom: '1px solid var(--sep)' }}>
+      <div className="small" style={{ fontWeight: 600 }}>Coach</div>
+      <div className="row" style={{ gap: 8 }}>
+        <span className="small muted">{u.coach ? u.coach.name : 'none'}</span>
+        {u.coach && <button className="iconbtn" style={{ width: 32, height: 30, borderRadius: 8, fontSize: 15, color: 'var(--red)' }}
+          onClick={() => confirmSheet({ title: 'Remove coach?', message: u.name + ' will no longer be under ' + u.coach.name + ', and their assigned program is deleted.', confirmText: 'Remove', danger: true, onConfirm: () => setCoach(null) })}
+          aria-label="remove coach"><Icon name="trash" /></button>}
+        <button className="btn sm" onClick={pickCoach}>{u.coach ? 'Change' : 'Assign'}</button>
+      </div>
+    </div>}
     {!u.admin && <button className="btn" style={{ margin: '8px 0 4px' }} onClick={() => {
       const role = u.role === 'coach' ? 'member' : 'coach'
       api('/api/admin/user/role', { method: 'POST', body: JSON.stringify({ id: u.id, role }) })
         .then(() => { toast(role === 'coach' ? 'Coach access enabled' : 'Coach access removed'); onChanged(); close() })
         .catch(e => toast(e.message))
     }}>{u.role === 'coach' ? 'Remove coach access' : 'Make coach'}</button>}
+    {u.id !== meId && !u.envAdmin && <button className="btn" style={{ margin: '8px 0 4px' }} onClick={() => u.admin
+      ? confirmSheet({ title: 'Remove admin from ' + u.name + '?', message: 'They immediately lose access to this dashboard.', confirmText: 'Remove admin', danger: true, onConfirm: () => setAdmin(false) })
+      : confirmSheet({ title: 'Make ' + u.name + ' an admin?', message: 'Admins can see every member\'s data, disable accounts, promote coaches and assign members to coaches.', confirmText: 'Make admin', onConfirm: () => setAdmin(true) })
+    }>{u.admin ? 'Remove admin' : 'Make admin'}</button>}
     {!u.admin && <button className={'btn ' + (u.disabled ? 'primary' : 'danger')} style={{ margin: '12px 0 4px' }}
       onClick={() => u.disabled ? setDisabled(false)
         : confirmSheet({ title: 'Disable ' + u.name + '?', message: 'They are signed out everywhere and can no longer sync or log in until re-enabled.', confirmText: 'Disable', danger: true, onConfirm: () => setDisabled(true) })}>
@@ -110,7 +147,7 @@ export default function Admin() {
   useEffect(() => { if (!user?.admin) return; loadUsers(); loadInvites(); const iv = setInterval(loadUsers, 15000); return () => clearInterval(iv) }, [])
   if (!user?.admin) return null
 
-  const openUser = id => openSheet(close => <UserDetail id={id} onChanged={loadUsers} close={close} />)
+  const openUser = id => openSheet(close => <UserDetail id={id} users={users} meId={user.id} onChanged={loadUsers} close={close} />)
   const liveUsers = (users || []).filter(u => u.live)
   const activeCount = (users || []).filter(u => u.lastSync && Date.now() - u.lastSync < 7 * 86400000).length
   const disabledCount = (users || []).filter(u => u.disabled).length
@@ -144,8 +181,8 @@ export default function Admin() {
     <h4 className="sec">Users</h4>
     <div className="list">
       {(users || []).map(u => <div key={u.id} className="item" onClick={() => openUser(u.id)} style={u.disabled ? { opacity: .55 } : null}>
-        <div className="grow"><div className="tt">{u.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)', display: 'inline-block', marginRight: 5 }} />}{u.name} {u.admin && <span className="tag acc" style={{ marginLeft: 4 }}>admin</span>}{u.disabled && <span className="tag" style={{ marginLeft: 4, color: 'var(--red)' }}>off</span>}</div>
-          <div className="ss">{u.live ? 'training now · ' + u.live.name : u.workouts + ' workouts' + (u.lastWorkout ? ' · last ' + fmtDate(u.lastWorkout) : '') + ' · synced ' + rel(u.lastSync)}</div></div>
+        <div className="grow"><div className="tt">{u.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)', display: 'inline-block', marginRight: 5 }} />}{u.name} {u.admin && <span className="tag acc" style={{ marginLeft: 4 }}>admin</span>}{!u.admin && u.role === 'coach' && <span className="tag" style={{ marginLeft: 4 }}>coach</span>}{u.disabled && <span className="tag" style={{ marginLeft: 4, color: 'var(--red)' }}>off</span>}</div>
+          <div className="ss">{u.live ? 'training now · ' + u.live.name : u.workouts + ' workouts' + (u.lastWorkout ? ' · last ' + fmtDate(u.lastWorkout) : '') + (u.coach ? ' · coach: ' + u.coach.name : '') + ' · synced ' + rel(u.lastSync)}</div></div>
         {u.hasPush && <Icon name="bell" title="push enabled" style={{ fontSize: 15, color: 'var(--label-3)' }} />}<Icon name="chevronRight" className="chev" />
       </div>)}
       {users && !users.length && <div className="empty">No users yet.</div>}

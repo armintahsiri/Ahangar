@@ -26,7 +26,6 @@ export default {
   "Sign in or create an account from the welcome screen.": "از صفحهٔ خوش‌آمدگویی وارد شوید یا حساب بسازید.",
   "Use at least 8 characters. Save these details so you can sign in on your other devices.": "رمزی با دست‌کم ۸ نویسه انتخاب کنید و این اطلاعات را برای ورود در دستگاه‌های دیگر نگه دارید.",
   "You’re in the demo": "در نسخهٔ نمایشی هستید",
-  "Code ": "کد ", "Code revoked": "کد باطل شد", "Copied ": "کپی شد ",
   "No entries yet — log your weight to start the curve. It’s a good moment to set a goal, too.": "هنوز داده‌ای ثبت نشده است. وزن‌تان را ثبت کنید تا نمودار شکل بگیرد؛ می‌توانید همین حالا هدف هم تعیین کنید.",
   "No entries yet — log your weight to start the curve. It's also asked before every workout.": "هنوز داده‌ای ثبت نشده است. وزن‌تان را ثبت کنید تا نمودار شکل بگیرد؛ پیش از هر تمرین هم وزن‌تان پرسیده می‌شود.",
   "Exercise instructions aren't available in this language yet — they stay in English.": "راهنمای حرکت‌ها هنوز به این زبان آماده نیست و به انگلیسی نمایش داده می‌شود.",
@@ -379,11 +378,10 @@ export default {
   "{0} per side": "{0} برای هر سمت", "You still log the total: {0} is {1} per side.": "همچنان مجموع را ثبت می‌کنید: {0} یعنی {1} برای هر سمت.",
 
   // --- مربی و شاگرد ---
-  "Coach dashboard": "پنل مربی", "Invite a club member": "دعوت عضو باشگاه",
-  "Share this one-time code with a member. Their account will be linked to you.": "این کد یک‌بارمصرف را با عضو باشگاه به اشتراک بگذارید تا حسابش به شما وصل شود.",
-  "Create member invite": "ساخت دعوت‌نامهٔ عضو", "Invite code copied": "کد دعوت کپی شد", "Could not create invite": "ساخت دعوت‌نامه ممکن نشد",
+  "Coach dashboard": "پنل مربی",
+  "Members are assigned to you by the gym owner. You write a separate program for each of them from your own templates.": "شاگردها توسط باشگاه‌دار به شما تخصیص داده می‌شوند. برای هر شاگرد از روی برنامه‌های خودتان یک برنامهٔ جداگانه می‌نویسید.",
   "My clients": "شاگردهای من", "{0} clients": "{0} شاگرد", "workouts": "تمرین", "assigned routines": "برنامهٔ اختصاص‌یافته",
-  "Disabled": "غیرفعال", "No clients yet. Invite a member to get started.": "هنوز شاگردی ندارید. برای شروع یک عضو را دعوت کنید.",
+  "Disabled": "غیرفعال", "No clients yet — the gym owner assigns members to you.": "هنوز شاگردی ندارید؛ باشگاه‌دار شاگردها را به شما تخصیص می‌دهد.",
   "Program for {0}": "برنامهٔ {0}", "My templates": "برنامه‌های من",
   "Create or edit a routine in My Plan, then assign a separate snapshot to this client. Later edits to your template do not change the client’s assigned plan.": "برنامه را در بخش برنامه‌های خود بسازید یا ویرایش کنید و نسخه‌ای جداگانه به این شاگرد اختصاص دهید. تغییرهای بعدی برنامهٔ شما، برنامهٔ اختصاص‌یافتهٔ شاگرد را عوض نمی‌کند.",
   "Choose a routine template": "یک برنامه انتخاب کنید", "Assign routine to this day": "اختصاص برنامه به این روز",
@@ -392,11 +390,14 @@ export default {
   "Member workout reports": "گزارش تمرین شاگرد", "Loading reports…": "در حال بارگذاری گزارش‌ها…",
   "{0} of {1} sets": "{0} ست از {1} ست", "Complete": "کامل", "Partial": "ناقص", "No workout reports yet.": "هنوز گزارشی از تمرین ثبت نشده است.",
   "Could not load clients": "بارگذاری شاگردها ممکن نشد", "Could not update program": "به‌روزرسانی برنامه ممکن نشد",
-  "Assigned program updated": "برنامهٔ شاگرد به‌روز شد", "Copied": "کپی شد", "Refresh": "تازه‌سازی", "Back": "بازگشت",
+  "Assigned program updated": "برنامهٔ شاگرد به‌روز شد", "Refresh": "تازه‌سازی", "Back": "بازگشت",
   "Coach-assigned plan": "برنامهٔ مربی", "Assigned by {0}. Only your coach can change this plan. You can still log the workout you actually completed.": "این برنامه را {0} تعیین کرده است. فقط مربی می‌تواند آن را تغییر دهد؛ شما همچنان می‌توانید تمرینی را که واقعاً انجام داده‌اید ثبت کنید.",
   "your coach": "مربی شما", "Assigned by {0}": "تعیین‌شده توسط {0}",
   "This plan is read-only. Your coach can change the prescription. Log the sets you actually complete during your workout.": "این برنامه فقط قابل مشاهده است. مربی می‌تواند آن را تغییر دهد؛ شما ست‌هایی را که واقعاً انجام می‌دهید ثبت کنید.",
-  "Coach": "مربی", "Make coach": "تبدیل به مربی", "Remove coach access": "گرفتن دسترسی مربی",
+  "Coach": "مربی",
   "Set": "ست", "Not completed": "انجام‌نشده",
-  "A coach invite links your account to that coach. They can view your workout reports, but only you can submit or change them.": "دعوت‌نامهٔ مربی حساب شما را به او وصل می‌کند. مربی گزارش تمرینتان را می‌بیند، اما فقط خودتان می‌توانید آن را ثبت یا تغییر دهید."
+
+  // --- باشگاه‌دار و نقش‌ها ---
+  "My coach": "مربی من",
+  "Assigned by {0}. Your program is on the Plan tab.": "تعیین‌شده توسط {0}. برنامهٔ شما در زبانهٔ برنامه است."
 }

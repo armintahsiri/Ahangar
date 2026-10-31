@@ -38,6 +38,10 @@ db.subs = db.subs || [];
 const hadPasskeys = (db.creds || []).length > 0;
 db.creds = [];
 db.invites = db.invites || [];
+// Coach self-serve invites are gone: the gym owner wires athletes to coaches from the panel,
+// so old db.json files carrying coach-owned invite codes get them scrubbed once on boot.
+const hadCoachInvites = db.invites.some(i => i.coachId);
+db.invites = db.invites.filter(i => !i.coachId);
 db.coachLinks = db.coachLinks || [];
 db.coachAssignments = db.coachAssignments || [];
 const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(user.id));
@@ -56,13 +60,19 @@ function assignmentFor(memberId) {
   if (!plan) return null;
   return { coach: coach ? { id: coach.id, name: coach.name } : null, ...plan };
 }
+// Reverse lookup for the admin dashboard: which coach (if any) is this member wired to.
+const coachOf = memberId => {
+  const link = db.coachLinks.find(x => x.memberId === memberId && x.active !== false);
+  const coach = link && db.users.find(u => u.id === link.coachId);
+  return coach ? { id: coach.id, name: coach.name } : null;
+};
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2)); }
 function atomicWrite(file, content) {
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }
-if (hadPasskeys) saveDb();
+if (hadPasskeys || hadCoachInvites) saveDb();
 const stateFile = uid => path.join(DATA, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
 function readState(uid) {
   try { return JSON.parse(fs.readFileSync(stateFile(uid), 'utf8')); } catch { return null; }
@@ -310,13 +320,7 @@ const routes = {
     let invite = code ? db.invites.find(i => i.code === code && !i.usedBy && !i.revoked) : null;
     if (INVITE_ONLY && !invite) return json(res, 403, { error: 'invite code is no longer valid — ask for a new one' });
     const user = { id: crypto.randomBytes(12).toString('base64url'), name, phone, password: passwordRecord(password), created: new Date().toISOString() };
-    if (invite) {
-      user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created;
-      if (invite.coachId && db.users.some(u => u.id === invite.coachId && isCoach(u))) {
-        user.coachId = invite.coachId;
-        db.coachLinks.push({ coachId: invite.coachId, memberId: user.id, active: true, created: user.created });
-      }
-    }
+    if (invite) { user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created; }
     db.users.push(user);
     saveDb();
     json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
@@ -480,7 +484,8 @@ const routes = {
       const last = workouts[workouts.length - 1];
       return {
         id: u.id, name: u.name, created: u.created || null,
-        disabled: !!u.disabled, admin: isAdmin(u), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null,
+        disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null,
+        coach: isCoach(u) || isAdmin(u) ? null : coachOf(u.id),
         workouts: workouts.length,
         lastWorkout: last ? last.d : null,
         lastSync: S._ts || null,
@@ -499,7 +504,7 @@ const routes = {
     if (!u) return json(res, 404, { error: 'no such user' });
     const S = readState(u.id) || {};
     json(res, 200, {
-      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null },
+      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null, coach: coachOf(u.id) },
       unit: S.unit || 'kg',
       lastSync: S._ts || null,
       routines: (S.routines || []).map(r => ({ id: r.id, name: r.name, emoji: r.emoji, count: (r.ex || []).length })),
@@ -542,6 +547,49 @@ const routes = {
     json(res, 200, { user: publicUser(u) });
   },
 
+  // The gym owner wires a member to a coach from the panel (coachId null to unlink). One coach
+  // per member: linking replaces any previous link and drops whatever the previous coach had
+  // assigned, so the member starts their new coach's program from a clean slate.
+  'POST /api/admin/user/coach': async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u) return json(res, 404, { error: 'no such user' });
+    if (isAdmin(u)) return json(res, 400, { error: 'an admin cannot be assigned to a coach' });
+    if (u.role === 'coach') return json(res, 400, { error: 'a coach cannot be assigned to a coach' });
+    const coachId = body.coachId ? String(body.coachId) : null;
+    if (coachId) {
+      if (coachId === u.id) return json(res, 400, { error: 'a member cannot be their own coach' });
+      const coach = db.users.find(x => x.id === coachId);
+      if (!coach || !isCoach(coach)) return json(res, 404, { error: 'no such coach' });
+    }
+    db.coachLinks = db.coachLinks.filter(x => x.memberId !== u.id);
+    db.coachAssignments = db.coachAssignments.filter(x => x.memberId !== u.id);
+    if (coachId) {
+      db.coachLinks.push({ coachId, memberId: u.id, active: true, created: new Date().toISOString() });
+      u.coachId = coachId;
+    } else {
+      delete u.coachId;
+    }
+    saveDb();
+    json(res, 200, { ok: true, coach: coachOf(u.id) });
+  },
+
+  // Promote/demote an admin. Self-change is refused so the last admin can't lock themselves out
+  // in one tap, and ADMIN_UIDS entries can't be demoted because the env var would re-admin them
+  // on the next boot anyway — the UI hides the button for both cases.
+  'POST /api/admin/user/admin': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u) return json(res, 404, { error: 'no such user' });
+    if (u.id === admin.id) return json(res, 400, { error: 'you cannot change your own admin status' });
+    if (!body.admin && ADMIN_UIDS.includes(u.id)) return json(res, 400, { error: 'this admin is managed by server configuration (ADMIN_UIDS)' });
+    if (body.admin) u.admin = true; else delete u.admin;
+    saveDb();
+    json(res, 200, { user: publicUser(u) });
+  },
+
   'GET /api/coach/clients': async (req, res) => {
     const coach = requireCoach(req, res); if (!coach) return;
     const links = db.coachLinks.filter(x => x.coachId === coach.id && x.active !== false);
@@ -555,16 +603,6 @@ const routes = {
         assignment: db.coachAssignments.find(x => x.coachId === coach.id && x.memberId === u.id) || null };
     }).filter(Boolean);
     json(res, 200, { clients });
-  },
-
-  'POST /api/coach/invites/new': async (req, res) => {
-    const coach = requireCoach(req, res); if (!coach) return;
-    const body = await readBody(req);
-    let code;
-    do { code = crypto.randomBytes(8).toString('hex').toUpperCase(); } while (db.invites.some(i => i.code === code));
-    const invite = { code, note: String(body.note || '').slice(0, 60), coachId: coach.id, createdBy: coach.id, created: new Date().toISOString() };
-    db.invites.push(invite); saveDb();
-    json(res, 200, { invite });
   },
 
   'GET /api/coach/client': async (req, res) => {

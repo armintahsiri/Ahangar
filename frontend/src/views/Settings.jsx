@@ -82,6 +82,7 @@ export default function Settings() {
           onClick={() => window.open(REPO, '_blank', 'noopener')} />
       </> : user ? <>
         <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={user.phone || t('Add a mobile number and password to this profile.')} />
+        {S.coachProgram && <Row icon="person" iconTint="var(--acc)" title={t('My coach')} subtitle={t('Assigned by {0}. Your program is on the Plan tab.', S.coachProgram.coach?.name || t('your coach'))} accessory="chevron" onClick={() => nav('/plan')} />}
         {!user.phone && <Row icon="lock" iconTint="var(--blue)" title={t('Set mobile number and password')} accessory="chevron" onClick={addCredentials} />}
         {(user.admin || user.role === 'coach') && <Row icon="person" iconTint="var(--acc)" title={t('Coach dashboard')} accessory="chevron" onClick={() => nav('/coach')} />}
         {user.admin && <Row icon="wrench" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}

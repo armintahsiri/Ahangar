@@ -25,7 +25,6 @@ export default function Coach() {
   const [sourceRoutine, setSourceRoutine] = useState('')
   const [day, setDay] = useState('1')
   const [detail, setDetail] = useState(null)
-  const [invite, setInvite] = useState('')
   const [busy, setBusy] = useState(false)
   const selectedClient = useMemo(() => clients.find(c => c.id === selected) || null, [clients, selected])
 
@@ -43,15 +42,6 @@ export default function Coach() {
     if (!selected) { setDetail(null); return }
     api('/api/coach/client?id=' + encodeURIComponent(selected)).then(setDetail).catch(e => toast(e.message))
   }, [selected])
-
-  const makeInvite = async () => {
-    try {
-      const { invite: item } = await api('/api/coach/invites/new', { method: 'POST', body: '{}' })
-      setInvite(item.code)
-      navigator.clipboard?.writeText(item.code).catch(() => {})
-      toast(t('Invite code copied'))
-    } catch (e) { toast(e.message || t('Could not create invite')) }
-  }
 
   const saveAssignment = async next => {
     if (!selectedClient) return
@@ -96,11 +86,7 @@ export default function Coach() {
     </div>
 
     <div className="card">
-      <h2 style={{ marginTop: 0 }}>{t('Invite a club member')}</h2>
-      <div className="muted small">{t('Share this one-time code with a member. Their account will be linked to you.')}</div>
-      <div style={{ height: 10 }} />
-      <Button variant="primary" icon="plus" onClick={makeInvite}>{t('Create member invite')}</Button>
-      {invite && <button className="input" style={{ marginTop: 10, textAlign: 'center', fontFamily: 'monospace', letterSpacing: '.12em' }} onClick={() => { navigator.clipboard?.writeText(invite).catch(() => {}); toast(t('Copied')) }}>{invite}</button>}
+      <div className="muted small">{t('Members are assigned to you by the gym owner. You write a separate program for each of them from your own templates.')}</div>
     </div>
 
     <h4 className="sec">{t('My clients')}</h4>
@@ -108,7 +94,7 @@ export default function Coach() {
       <span className="lrow-i"><Icon name="person" /></span>
       <div className="grow"><div className="tt">{c.name}</div><div className="ss">{c.workouts} {t('workouts')} · {c.assignment?.routines?.length || 0} {t('assigned routines')}</div></div>
       {c.disabled && <span className="tag">{t('Disabled')}</span>}
-    </div>)}</div> : <div className="empty">{t('No clients yet. Invite a member to get started.')}</div>}
+    </div>)}</div> : <div className="empty">{t('No clients yet — the gym owner assigns members to you.')}</div>}
 
     {selectedClient && <>
       <div className="row between" style={{ marginTop: 20 }}><h4 className="sec" style={{ margin: 0 }}>{t('Program for {0}', selectedClient.name)}</h4><Button size="sm" onClick={() => nav('/plan')}>{t('My templates')}</Button></div>

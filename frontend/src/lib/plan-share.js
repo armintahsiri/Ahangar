@@ -50,7 +50,8 @@ function cleanEx(e) {
 
 /** Build the shareable bundle: every routine, the week schedule, referenced customs. */
 export function buildPlanBundle(S, name) {
-  const routines = (S.routines || []).map(r => ({
+  // Coach-assigned snapshots belong to the coach's program — they are not the member's to share.
+  const routines = (S.routines || []).filter(r => !r.coachManaged).map(r => ({
     id: r.id, name: r.name, emoji: r.emoji, ...(r.prog ? { prog: r.prog } : {}), ex: (r.ex || []).map(cleanEx)
   }))
   const usedIds = new Set(routines.flatMap(r => r.ex.map(e => e.id)))
