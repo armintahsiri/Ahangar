@@ -5,6 +5,8 @@ import { useUI } from './store/useUI.js'
 import { bindUI } from './components/ui.jsx'
 import { ACCENTS } from './lib/format.js'
 import { directionFor, setLang, useLang } from './lib/i18n.js'
+import { DEMO } from './lib/demo.js'
+import { MOBILE } from './lib/mobile.js'
 import { setNav } from './lib/nav.js'
 import { useWakeLock } from './lib/wakelock.js'
 import { startFlow } from './sheets.jsx'
@@ -56,7 +58,9 @@ function Shell() {
   // bound to the workout, not to the route — checking Stats mid-session keeps the screen on
   useWakeLock(!!S.active && S.keepAwake !== false)
 
-  const authed = user || isGuest
+  // Guest mode only exists in the backend-less builds (demo / native app); the self-hosted
+  // web build always requires a signed-in profile.
+  const authed = user || ((DEMO || MOBILE) && isGuest)
   if (!ready && !authed) return (
     <div id="app">
       <div style={{ paddingTop: '44vh', display: 'flex', justifyContent: 'center', fontSize: 34, color: 'var(--label-3)' }}>

@@ -57,7 +57,6 @@ export default function Login() {
     {head}<div className="muted" style={{ marginBottom: 34 }}>{t('Your workouts. Your weights. Your profile.')}</div>
     <Button variant="primary" icon="person" onClick={() => useUI.getState().openSheet(close => <AccountSheet close={close} registering={false} />)}>{t('Sign in')}</Button>
     <div style={{ height: 10 }} /><Button icon="sparkles" onClick={() => useUI.getState().openSheet(close => <AccountSheet close={close} registering />)}>{t('Create new profile')}</Button>
-    <div style={{ height: 10 }} /><Button variant="ghost" className="dim" onClick={() => setGuest(true)}>{t('Continue without account')}</Button>
     <div className="dim small" style={{ marginTop: 26, lineHeight: 1.5 }}>{t('Sign in with your mobile number and password.')}<br />{t('Each profile keeps its own plan, workouts & body weight.')}</div>
   </div>
 }

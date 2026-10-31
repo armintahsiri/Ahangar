@@ -2,6 +2,8 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { effectiveRoutine } from '../lib/history.js'
 import { todayISO } from '../lib/format.js'
+import { DEMO } from '../lib/demo.js'
+import { MOBILE } from '../lib/mobile.js'
 import { t } from '../lib/i18n.js'
 import Icon from './Icon.jsx'
 
@@ -11,7 +13,8 @@ export default function TabBar({ onStart }) {
   const S = useStore(s => s.S)
   const user = useStore(s => s.user)
   const isGuest = useStore(s => s.isGuest())
-  if (!user && !isGuest) return null
+  // matches the Shell gate: guest mode only counts in the backend-less builds
+  if (!user && !((DEMO || MOBILE) && isGuest)) return null
   const cur = loc.pathname.split('/')[1] || 'home'
   const on = k => cur === k || (cur === 'history' && k === 'stats') || (cur === 'settings' && k === 'home')
 

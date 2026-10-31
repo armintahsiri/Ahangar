@@ -17,7 +17,3 @@ export async function signIn(phone, password) {
   const { user } = await api('/api/login', { method: 'POST', body: JSON.stringify({ phone, password }) })
   return user
 }
-export async function saveCredentials(phone, password) {
-  const { user } = await api('/api/account/credentials', { method: 'POST', body: JSON.stringify({ phone, password }) })
-  return user
-}

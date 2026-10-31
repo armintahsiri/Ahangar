@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { api } from '../lib/api.js'
+import { t } from '../lib/i18n.js'
 import { fmtDate, fmtNum, fmtVol, fmtDur } from '../lib/format.js'
 import { workoutVolume, setsDone } from '../lib/history.js'
 import { confirmSheet } from '../sheets.jsx'
@@ -10,18 +11,17 @@ import Icon from '../components/Icon.jsx'
 import { Button } from '../components/ui.jsx'
 
 // Admin-only operator dashboard (admin flag; guarded again server-side).
-// Deliberately English-only — it isn't part of the translated end-user surface, so it stays
-// out of the per-language string packs.
+// Strings go through the standard t() packs like the rest of the UI.
 
 const rel = ts => {
-  if (!ts) return 'never'
+  if (!ts) return t('never')
   const s = Math.max(0, (Date.now() - ts) / 1000)
-  if (s < 60) return 'just now'
-  if (s < 3600) return Math.floor(s / 60) + 'm ago'
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago'
-  return Math.floor(s / 86400) + 'd ago'
+  if (s < 60) return t('just now')
+  if (s < 3600) return t('{0}m ago', Math.floor(s / 60))
+  if (s < 86400) return t('{0}h ago', Math.floor(s / 3600))
+  return t('{0}d ago', Math.floor(s / 86400))
 }
-const dur = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h' + (m % 60) + 'm' }
+const dur = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return m < 60 ? t('{0} min', m) : t('{0}h {1}m', Math.floor(m / 60), m % 60) }
 
 function UserDetail({ id, users, meId, onChanged, close }) {
   const [d, setD] = useState(null)
@@ -29,106 +29,106 @@ function UserDetail({ id, users, meId, onChanged, close }) {
   const openSheet = useUI(s => s.openSheet)
   const load = () => api('/api/admin/user?id=' + encodeURIComponent(id)).then(setD).catch(e => toast(e.message))
   useEffect(() => { load() }, [id])
-  if (!d) return <div className="muted small">Loading…</div>
+  if (!d) return <div className="muted small">{t('Loading…')}</div>
   const u = d.user
   const setDisabled = disabled => {
     api('/api/admin/user/disable', { method: 'POST', body: JSON.stringify({ id: u.id, disabled }) })
-      .then(() => { toast(disabled ? 'User disabled' : 'User enabled'); onChanged(); close() })
+      .then(() => { toast(disabled ? t('User disabled') : t('User enabled')); onChanged(); close() })
       .catch(e => toast(e.message))
   }
   const setAdmin = flag => {
     api('/api/admin/user/admin', { method: 'POST', body: JSON.stringify({ id: u.id, admin: flag }) })
-      .then(() => { toast(flag ? u.name + ' is now an admin' : 'Admin access removed'); onChanged(); close() })
+      .then(() => { toast(flag ? t('{0} is now an admin', u.name) : t('Admin access removed')); onChanged(); close() })
       .catch(e => toast(e.message))
   }
   const setCoach = (coachId, pickerClose) => {
     api('/api/admin/user/coach', { method: 'POST', body: JSON.stringify({ id: u.id, coachId }) })
-      .then(r => { toast(r.coach ? 'Assigned to ' + r.coach.name : 'Coach removed'); pickerClose?.(); load(); onChanged() })
+      .then(r => { toast(r.coach ? t('Assigned to {0}', r.coach.name) : t('Coach removed')); pickerClose?.(); load(); onChanged() })
       .catch(e => toast(e.message))
   }
   const pickCoach = () => {
     const coaches = (users || []).filter(x => x.role === 'coach' && !x.disabled && x.id !== u.id)
     openSheet(pclose => <div style={{ padding: 16 }}>
-      <h3 style={{ marginTop: 0 }}>Assign coach to {u.name}</h3>
+      <h3 style={{ marginTop: 0 }}>{t('Assign coach to {0}', u.name)}</h3>
       {coaches.length ? <div className="list">{coaches.map(c => <button key={c.id} className="lrow tap" onClick={() => setCoach(c.id, pclose)}>
         <span className="lrow-m"><span className="lrow-t">{c.name}</span></span>
         {u.coach?.id === c.id && <Icon name="check" className="lrow-k" />}
       </button>)}</div>
-        : <div className="empty small">No coaches yet — promote a member to coach first.</div>}
+        : <div className="empty small">{t('No coaches yet — promote a member to coach first.')}</div>}
     </div>)
   }
   return <>
     <h3 className="capitalize">{u.name}</h3>
     <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '8px 0 12px' }}>
-      {u.admin && <span className="tag acc">admin</span>}
-      {!u.admin && <span className="tag">{u.role === 'coach' ? 'coach' : 'member'}</span>}
-      {u.disabled && <span className="tag" style={{ color: 'var(--red)' }}>disabled</span>}
-      {u.invitedBy && <span className="tag">invite {u.invitedBy}</span>}
-      <span className="tag">joined {u.created ? fmtDate(u.created.slice(0, 10)) : '—'}</span>
+      {u.admin && <span className="tag acc">{t('admin')}</span>}
+      {!u.admin && <span className="tag" style={{ color: u.role === 'coach' ? 'var(--blue)' : undefined }}>{u.role === 'coach' ? t('coach') : t('member')}</span>}
+      {u.disabled && <span className="tag" style={{ color: 'var(--red)' }}>{t('disabled')}</span>}
+      {u.invitedBy && <span className="tag">{t('invite {0}', u.invitedBy)}</span>}
+      <span className="tag">{t('joined {0}', u.created ? fmtDate(u.created.slice(0, 10)) : '—')}</span>
     </div>
-    <div className="tiles" style={{ textAlign: 'left' }}>
-      <div className="tile"><div className="l">Workouts</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.workouts.length}</div></div>
-      <div className="tile"><div className="l">Weigh-ins</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.bodyweight.length}</div></div>
-      <div className="tile"><div className="l">Routines</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.routines.length}</div></div>
-      <div className="tile"><div className="l">Last sync</div><div className="v" style={{ fontSize: '.95rem' }}>{rel(d.lastSync)}</div></div>
+    <div className="tiles" style={{ textAlign: 'start' }}>
+      <div className="tile"><div className="l">{t('Workouts')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.workouts.length}</div></div>
+      <div className="tile"><div className="l">{t('Weigh-ins')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.bodyweight.length}</div></div>
+      <div className="tile"><div className="l">{t('Routines')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.routines.length}</div></div>
+      <div className="tile"><div className="l">{t('Last sync')}</div><div className="v" style={{ fontSize: '.95rem' }}>{rel(d.lastSync)}</div></div>
     </div>
     {!u.admin && u.role !== 'coach' && <div className="row between" style={{ margin: '10px 0 4px', padding: '9px 2px', borderBottom: '1px solid var(--sep)' }}>
-      <div className="small" style={{ fontWeight: 600 }}>Coach</div>
+      <div className="small" style={{ fontWeight: 600 }}>{t('Coach')}</div>
       <div className="row" style={{ gap: 8 }}>
-        <span className="small muted">{u.coach ? u.coach.name : 'none'}</span>
+        <span className="small muted">{u.coach ? u.coach.name : t('none')}</span>
         {u.coach && <button className="iconbtn" style={{ width: 32, height: 30, borderRadius: 8, fontSize: 15, color: 'var(--red)' }}
-          onClick={() => confirmSheet({ title: 'Remove coach?', message: u.name + ' will no longer be under ' + u.coach.name + ', and their assigned program is deleted.', confirmText: 'Remove', danger: true, onConfirm: () => setCoach(null) })}
-          aria-label="remove coach"><Icon name="trash" /></button>}
-        <button className="btn sm" onClick={pickCoach}>{u.coach ? 'Change' : 'Assign'}</button>
+          onClick={() => confirmSheet({ title: t('Remove coach?'), message: t('{0} will no longer be under {1}, and their assigned program is deleted.', u.name, u.coach.name), confirmText: t('Remove'), danger: true, onConfirm: () => setCoach(null) })}
+          aria-label={t('remove coach')}><Icon name="trash" /></button>}
+        <button className="btn sm" onClick={pickCoach}>{u.coach ? t('Change') : t('Assign')}</button>
       </div>
     </div>}
     {!u.admin && <button className="btn" style={{ margin: '8px 0 4px' }} onClick={() => {
       const role = u.role === 'coach' ? 'member' : 'coach'
       api('/api/admin/user/role', { method: 'POST', body: JSON.stringify({ id: u.id, role }) })
-        .then(() => { toast(role === 'coach' ? 'Coach access enabled' : 'Coach access removed'); onChanged(); close() })
+        .then(() => { toast(role === 'coach' ? t('Coach access enabled') : t('Coach access removed')); onChanged(); close() })
         .catch(e => toast(e.message))
-    }}>{u.role === 'coach' ? 'Remove coach access' : 'Make coach'}</button>}
+    }}>{u.role === 'coach' ? t('Remove coach access') : t('Make coach')}</button>}
     {u.id !== meId && !u.envAdmin && <button className="btn" style={{ margin: '8px 0 4px' }} onClick={() => u.admin
-      ? confirmSheet({ title: 'Remove admin from ' + u.name + '?', message: 'They immediately lose access to this dashboard.', confirmText: 'Remove admin', danger: true, onConfirm: () => setAdmin(false) })
-      : confirmSheet({ title: 'Make ' + u.name + ' an admin?', message: 'Admins can see every member\'s data, disable accounts, promote coaches and assign members to coaches.', confirmText: 'Make admin', onConfirm: () => setAdmin(true) })
-    }>{u.admin ? 'Remove admin' : 'Make admin'}</button>}
+      ? confirmSheet({ title: t('Remove admin from {0}?', u.name), message: t('They immediately lose access to this dashboard.'), confirmText: t('Remove admin'), danger: true, onConfirm: () => setAdmin(false) })
+      : confirmSheet({ title: t('Make {0} an admin?', u.name), message: t("Admins can see every member's data, disable accounts, promote coaches and assign members to coaches."), confirmText: t('Make admin'), onConfirm: () => setAdmin(true) })
+    }>{u.admin ? t('Remove admin') : t('Make admin')}</button>}
     {!u.admin && <button className={'btn ' + (u.disabled ? 'primary' : 'danger')} style={{ margin: '12px 0 4px' }}
       onClick={() => u.disabled ? setDisabled(false)
-        : confirmSheet({ title: 'Disable ' + u.name + '?', message: 'They are signed out everywhere and can no longer sync or log in until re-enabled.', confirmText: 'Disable', danger: true, onConfirm: () => setDisabled(true) })}>
-      {u.disabled ? 'Enable account' : 'Disable account'}</button>}
-    <h4 className="sec">Workout history</h4>
+        : confirmSheet({ title: t('Disable {0}?', u.name), message: t('They are signed out everywhere and can no longer sync or log in until re-enabled.'), confirmText: t('Disable'), danger: true, onConfirm: () => setDisabled(true) })}>
+      {u.disabled ? t('Enable account') : t('Disable account')}</button>}
+    <h4 className="sec">{t('Workout history')}</h4>
     {d.workouts.length ? <div className="list" style={{ gap: 0 }}>
       {d.workouts.slice(0, 60).map(w => <div key={w.id} className="row between" style={{ padding: '9px 2px', borderBottom: '1px solid var(--sep)' }}>
         <div><div className="small" style={{ fontWeight: 600 }}>{w.name}</div>
-          <div className="dim" style={{ fontSize: '.72rem' }}>{fmtDate(w.d, true)} · {fmtDur((w.end || w.start) - w.start)} · {setsDone(w)} sets{w.prs?.length ? ' · ' + w.prs.length + ' PR' : ''}</div></div>
+          <div className="dim" style={{ fontSize: '.72rem' }}>{fmtDate(w.d, true)} · {fmtDur((w.end || w.start) - w.start)} · {t('{0} sets', setsDone(w))}{w.prs?.length ? ' · ' + t('{0} PR', w.prs.length) : ''}</div></div>
         <span className="small muted">{fmtVol(w.vol ?? workoutVolume(w), d.unit)}</span>
       </div>)}
-    </div> : <div className="empty small">No workouts logged.</div>}
+    </div> : <div className="empty small">{t('No workouts logged.')}</div>}
   </>
 }
 
 function InvitesCard({ invites, reload }) {
   const toast = useUI(s => s.toast)
   const gen = () => api('/api/admin/invites/new', { method: 'POST', body: '{}' })
-    .then(({ invite }) => { navigator.clipboard?.writeText(invite.code).catch(() => {}); toast('Code ' + invite.code + ' created & copied'); reload() })
+    .then(({ invite }) => { navigator.clipboard?.writeText(invite.code).catch(() => {}); toast(t('Code {0} created & copied', invite.code)); reload() })
     .catch(e => toast(e.message))
   const revoke = code => api('/api/admin/invites/revoke', { method: 'POST', body: JSON.stringify({ code }) })
-    .then(() => { toast('Code revoked'); reload() }).catch(e => toast(e.message))
+    .then(() => { toast(t('Code revoked')); reload() }).catch(e => toast(e.message))
   const open = (invites || []).filter(i => !i.usedBy)
   const used = (invites || []).filter(i => i.usedBy)
   return <div className="card">
-    <div className="row between"><h2 style={{ margin: 0 }}>Invite codes</h2>
-      <Button variant="primary" size="sm" onClick={gen} icon="plus">Generate</Button></div>
-    <div className="small muted" style={{ margin: '6px 0 10px' }}>{open.length} unused · {used.length} redeemed</div>
+    <div className="row between"><h2 style={{ margin: 0 }}>{t('Invite codes')}</h2>
+      <Button variant="primary" size="sm" onClick={gen} icon="plus">{t('Generate')}</Button></div>
+    <div className="small muted" style={{ margin: '6px 0 10px' }}>{t('{0} unused · {1} redeemed', open.length, used.length)}</div>
     {open.map(i => <div key={i.code} className="row between" style={{ padding: '7px 2px', borderBottom: '1px solid var(--sep)' }}>
       <span style={{ fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontWeight: 500, letterSpacing: '.06em' }}
-        onClick={() => { navigator.clipboard?.writeText(i.code).catch(() => {}); toast('Copied ' + i.code) }}>{i.code}</span>
-      <button className="iconbtn" style={{ width: 32, height: 30, borderRadius: 8, fontSize: 15, color: 'var(--red)' }} onClick={() => revoke(i.code)} aria-label="revoke"><Icon name="trash" /></button>
+        onClick={() => { navigator.clipboard?.writeText(i.code).catch(() => {}); toast(t('Copied {0}', i.code)) }}>{i.code}</span>
+      <button className="iconbtn" style={{ width: 32, height: 30, borderRadius: 8, fontSize: 15, color: 'var(--red)' }} onClick={() => revoke(i.code)} aria-label={t('revoke')}><Icon name="trash" /></button>
     </div>)}
     {used.map(i => <div key={i.code} className="row between dim" style={{ padding: '7px 2px', fontSize: '.8rem' }}>
-      <span style={{ fontFamily: 'monospace' }}>{i.code}</span><span>→ {i.usedByName || 'used'}</span>
+      <span style={{ fontFamily: 'monospace' }}>{i.code}</span><span>→ {i.usedByName || t('used')}</span>
     </div>)}
-    {!open.length && !used.length && <div className="dim small">No codes yet — generate one to invite someone.</div>}
+    {!open.length && !used.length && <div className="dim small">{t('No codes yet — generate one to invite someone.')}</div>}
   </div>
 }
 
@@ -141,7 +141,7 @@ export default function Admin() {
   const [invites, setInvites] = useState(null)
   const [inviteOnly, setInviteOnly] = useState(false)
 
-  const loadUsers = () => api('/api/admin/users').then(d => { setUsers(d.users); setInviteOnly(d.invite_only) }).catch(e => toast(e.message || 'Failed to load'))
+  const loadUsers = () => api('/api/admin/users').then(d => { setUsers(d.users); setInviteOnly(d.invite_only) }).catch(e => toast(e.message || t('Failed to load')))
   const loadInvites = () => api('/api/admin/invites').then(d => setInvites(d.invites)).catch(() => {})
   // poll every 15s so the "training now" section stays live without a manual refresh
   useEffect(() => { if (!user?.admin) return; loadUsers(); loadInvites(); const iv = setInterval(loadUsers, 15000); return () => clearInterval(iv) }, [])
@@ -154,38 +154,38 @@ export default function Admin() {
 
   return <div className="narrow">
     <div className="hdr">
-      <button className="iconbtn" onClick={() => nav('/settings')} aria-label="Back"><Icon name="chevronLeft" /></button>
-      <div style={{ flex: 1, marginLeft: 8 }}><h1 style={{ margin: 0 }}>Admin</h1>
-        <div className="sub">{users ? users.length + ' users · ' + activeCount + ' active this week' : 'Loading…'}</div></div>
-      <button className="iconbtn" onClick={() => { loadUsers(); loadInvites() }} aria-label="refresh">↻</button>
+      <button className="iconbtn" onClick={() => nav('/settings')} aria-label={t('Back')}><Icon name="chevronLeft" /></button>
+      <div style={{ flex: 1, marginInlineStart: 8 }}><h1 style={{ margin: 0 }}>{t('Admin')}</h1>
+        <div className="sub">{users ? t('{0} users · {1} active this week', users.length, activeCount) : t('Loading…')}</div></div>
+      <button className="iconbtn" onClick={() => { loadUsers(); loadInvites() }} aria-label={t('Refresh')}>↻</button>
     </div>
 
     <div className="tiles" style={{ marginBottom: 12 }}>
-      <div className="tile"><div className="l">Users</div><div className="v">{users ? users.length : '—'}</div></div>
-      <div className="tile"><div className="l">Training now</div><div className="v" style={{ color: liveUsers.length ? 'var(--acc)' : undefined }}>{users ? liveUsers.length : '—'}</div></div>
-      <div className="tile"><div className="l">Active 7d</div><div className="v">{users ? activeCount : '—'}</div></div>
-      <div className="tile"><div className="l">Disabled</div><div className="v">{users ? disabledCount : '—'}</div></div>
+      <div className="tile"><div className="l">{t('Users')}</div><div className="v">{users ? users.length : '—'}</div></div>
+      <div className="tile"><div className="l">{t('Training now')}</div><div className="v" style={{ color: liveUsers.length ? 'var(--acc)' : undefined }}>{users ? liveUsers.length : '—'}</div></div>
+      <div className="tile"><div className="l">{t('Active 7d')}</div><div className="v">{users ? activeCount : '—'}</div></div>
+      <div className="tile"><div className="l">{t('Disabled')}</div><div className="v">{users ? disabledCount : '—'}</div></div>
     </div>
 
     {liveUsers.length > 0 && <div className="card" style={{ borderColor: 'var(--acc)' }}>
-      <h2 className="row" style={{ margin: '0 0 8px', gap: 6 }}><Icon name="dot" style={{ fontSize: 10, color: 'var(--green)' }} />Training now</h2>
+      <h2 className="row" style={{ margin: '0 0 8px', gap: 6 }}><Icon name="dot" style={{ fontSize: 10, color: 'var(--green)' }} />{t('Training now')}</h2>
       {liveUsers.map(u => <div key={u.id} className="row between" style={{ padding: '8px 2px', borderBottom: '1px solid var(--sep)' }} onClick={() => openUser(u.id)}>
         <div><div className="small" style={{ fontWeight: 600 }}>{u.name}</div>
-          <div className="dim" style={{ fontSize: '.72rem' }}>{u.live.name} · ex {u.live.exIdx}/{u.live.exTotal} · {u.live.setsDone}/{u.live.setsTotal} sets</div></div>
+          <div className="dim" style={{ fontSize: '.72rem' }}>{u.live.name} · {t('ex {0}/{1}', u.live.exIdx, u.live.exTotal)} · {t('{0}/{1} sets', u.live.setsDone, u.live.setsTotal)}</div></div>
         <span className="tag acc">{dur(Date.now() - u.live.startedAt)}</span>
       </div>)}
     </div>}
 
     <InvitesCard invites={invites} reload={loadInvites} />
 
-    <h4 className="sec">Users</h4>
+    <h4 className="sec">{t('Users')}</h4>
     <div className="list">
       {(users || []).map(u => <div key={u.id} className="item" onClick={() => openUser(u.id)} style={u.disabled ? { opacity: .55 } : null}>
-        <div className="grow"><div className="tt">{u.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)', display: 'inline-block', marginRight: 5 }} />}{u.name} {u.admin && <span className="tag acc" style={{ marginLeft: 4 }}>admin</span>}{!u.admin && u.role === 'coach' && <span className="tag" style={{ marginLeft: 4 }}>coach</span>}{u.disabled && <span className="tag" style={{ marginLeft: 4, color: 'var(--red)' }}>off</span>}</div>
-          <div className="ss">{u.live ? 'training now · ' + u.live.name : u.workouts + ' workouts' + (u.lastWorkout ? ' · last ' + fmtDate(u.lastWorkout) : '') + (u.coach ? ' · coach: ' + u.coach.name : '') + ' · synced ' + rel(u.lastSync)}</div></div>
-        {u.hasPush && <Icon name="bell" title="push enabled" style={{ fontSize: 15, color: 'var(--label-3)' }} />}<Icon name="chevronRight" className="chev" />
+        <div className="grow"><div className="tt">{u.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)', display: 'inline-block', marginInlineStart: 5 }} />}{u.name} {u.admin && <span className="tag acc" style={{ marginInlineStart: 4 }}>{t('admin')}</span>}{!u.admin && u.role === 'coach' && <span className="tag" style={{ marginInlineStart: 4, color: 'var(--blue)' }}>{t('coach')}</span>}{!u.admin && u.role !== 'coach' && !u.coach && !u.disabled && <span className="tag" style={{ marginInlineStart: 4, color: 'var(--yellow)' }}>{t('no coach')}</span>}{u.disabled && <span className="tag" style={{ marginInlineStart: 4, color: 'var(--red)' }}>{t('off')}</span>}</div>
+          <div className="ss" style={{ color: 'var(--label)' }}>{u.live ? t('training now · {0}', u.live.name) : [t('{0} workouts', u.workouts), u.lastWorkout ? t('last {0}', fmtDate(u.lastWorkout)) : null, u.coach ? t('coach: {0}', u.coach.name) : null, t('synced {0}', rel(u.lastSync))].filter(Boolean).join(' · ')}</div></div>
+        {u.hasPush && <Icon name="bell" title={t('push enabled')} style={{ fontSize: 15, color: 'var(--label-3)' }} />}<Icon name="chevronRight" className="chev" />
       </div>)}
-      {users && !users.length && <div className="empty">No users yet.</div>}
+      {users && !users.length && <div className="empty">{t('No users yet.')}</div>}
     </div>
   </div>
 }

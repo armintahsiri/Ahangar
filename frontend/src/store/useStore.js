@@ -233,6 +233,8 @@ export const useStore = create((set, get) => {
         set({ ready: true })
         return
       }
+      // Guest mode is web-demo/native-only; a stale flag from an older web build must not linger.
+      localStorage.removeItem('gym_guest')
       try {
         const config = await api('/api/config')
         set({ clubName: config.club_name || 'openGym' })
