@@ -8,6 +8,8 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   server: {
+    // expose the dev server on the LAN (0.0.0.0) so other devices can open it
+    host: true,
     port: Number(process.env.FRONTEND_PORT || 5173),
     strictPort: true,
     proxy: {
