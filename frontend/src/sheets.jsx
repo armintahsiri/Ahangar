@@ -26,6 +26,22 @@ const update = (...a) => useStore.getState().update(...a)
 const ui = () => useUI.getState()
 const toast = m => ui().toast(m)
 const snd = () => S().sound
+function readExerciseMedia(file, onLoad) {
+  if (!file) return
+  const name = (file.name || '').toLowerCase()
+  const type = file.type === 'image/gif' ? 'image/gif'
+    : file.type === 'video/mp4' ? 'video/mp4'
+      : name.endsWith('.gif') ? 'image/gif' : name.endsWith('.mp4') ? 'video/mp4' : ''
+  if (!type) { toast(t('Choose a GIF or MP4 file')); return }
+  if (file.size > 1000000) { toast(t('GIF and MP4 files must be 1 MB or smaller')); return }
+  const reader = new FileReader()
+  reader.onload = () => {
+    const data = String(reader.result || '')
+    onLoad(`data:${type};base64,${data.slice(data.indexOf(',') + 1)}`)
+  }
+  reader.onerror = () => toast(t('Could not read media file'))
+  reader.readAsDataURL(file)
+}
 
 /* ============================ custom confirm dialog ============================ */
 function ConfirmDialog({ title, message, confirmText, cancelText, danger, onConfirm, close }) {
@@ -340,12 +356,13 @@ function AddToRoutine({ ex, close }) {
 export const addToRoutineSheet = ex => ui().openSheet(close => <AddToRoutine ex={ex} close={close} />)
 
 /* ============================ custom exercises (issue #11) ============================ */
-// Name + body part is all it takes — the exercise then behaves like any built-in one
-// (planning, logging, PRs, stats), just without an animation.
+// Name + body part makes a custom exercise; optional GIF or MP4 media can show how it is done.
 function CustomExForm({ existing, prefill, onDone, close }) {
   const [n, setN] = useState(existing ? existing.n : (prefill || ''))
   const [bp, setBp] = useState(existing ? existing.bp : '')
   const [desc, setDesc] = useState(existing ? (existing.desc || '') : '')
+  const [gif, setGif] = useState(existing ? (existing.gif || '') : '')
+  const gifInput = useRef(null)
   const save = () => {
     const name = n.trim()
     if (!name) { toast(t('Give it a name')); return }
@@ -354,10 +371,10 @@ function CustomExForm({ existing, prefill, onDone, close }) {
     if (dup) { toast(t('“{0}” already exists', dup.n)); return }
     const d = desc.trim().slice(0, 1000)
     let id = existing && existing.id
-    if (existing) update(s => { const c = (s.customEx || []).find(x => x.id === id); if (c) { c.n = name; c.bp = bp; c.desc = d } })
+    if (existing) update(s => { const c = (s.customEx || []).find(x => x.id === id); if (c) { c.n = name; c.bp = bp; c.desc = d; c.gif = gif || undefined } })
     else {
       id = 'c' + uid()
-      update(s => { (s.customEx = s.customEx || []).push({ id, n: name, bp, desc: d, tg: '', eq: 'custom', custom: true }) })
+      update(s => { (s.customEx = s.customEx || []).push({ id, n: name, bp, desc: d, tg: '', eq: 'custom', custom: true, ...(gif ? { gif } : {}) }) })
     }
     close()
     toast(existing ? t('Saved') : t('“{0}” created', name))
@@ -365,12 +382,19 @@ function CustomExForm({ existing, prefill, onDone, close }) {
   }
   return <>
     <h3>{existing ? t('Edit custom exercise') : t('Create your own exercise')}</h3>
-    <div className="muted small" style={{ marginBottom: 12 }}>{t('Name it and pick a body part — it behaves like any other exercise, just without an animation.')}</div>
+    <div className="muted small" style={{ marginBottom: 12 }}>{t('Name it and pick a body part. You can also add a GIF or MP4 to show how it is done.')}</div>
     <input className="input" placeholder={t('Exercise name')} value={n} onChange={e => setN(e.target.value)} />
     <div className="chips" style={{ margin: '12px 0' }}>
       {BODYPARTS.map(b => <button key={b} className={'chip' + (bp === b ? ' on' : '')} onClick={() => setBp(b)}>{t(b)}</button>)}
     </div>
     {bp === 'cardio' && <div className="small dim row" style={{ marginBottom: 10, gap: 5 }}><Icon name="figureRun" style={{ fontSize: 13 }} />{t('Cardio exercises log time + speed instead of weight × reps.')}</div>}
+    <div className="row" style={{ gap: 8, margin: '12px 0 6px' }}>
+      <input ref={gifInput} type="file" accept="image/gif,video/mp4,.gif,.mp4" hidden onChange={e => { readExerciseMedia(e.target.files?.[0], setGif); e.target.value = '' }} />
+      <Button icon="upload" variant="ghost" onClick={() => gifInput.current?.click()}>{gif ? t('Change GIF or MP4') : t('Add GIF or MP4')}</Button>
+      {gif && <Button variant="ghost" onClick={() => setGif('')}>{t('Remove media')}</Button>}
+    </div>
+    <div className="small dim" style={{ marginBottom: 10 }}>{t('GIF or MP4, up to 1 MB. It will be saved with this exercise.')}</div>
+    {gif && <Media ex={{ id: existing?.id || 'custom-preview', n: n || t('Exercise preview'), gif }} />}
     <textarea className="input" rows={4} maxLength={1000} placeholder={t('Description (optional) — setup, cues, anything you want to remember')}
       value={desc} onChange={e => setDesc(e.target.value)} />
     <div style={{ height: 14 }} />
@@ -493,16 +517,8 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   // Both default from the dataset and are then whatever the config says — see isBw.
   const bw = !cardio && isBw({ ...c, id: ex.id })
   const perSide = isPerSide(c)
-  const readGif = file => {
-    if (!file) return
-    if (file.type !== 'image/gif') { toast(t('Choose a GIF file')); return }
-    if (file.size > 1000000) { toast(t('GIF must be 1 MB or smaller')); return }
-    const reader = new FileReader()
-    reader.onload = () => setC(x => ({ ...x, gifData: String(reader.result) }))
-    reader.onerror = () => toast(t('Could not read GIF'))
-    reader.readAsDataURL(file)
-  }
-  const mediaCfg = c.gifData ? { gifData: c.gifData } : {}
+  const setGifData = data => setC(x => ({ ...x, gifData: data }))
+  const mediaCfg = c.gifData ? { gifData: c.gifData } : ex.custom && ex.gif ? { gifData: ex.gif } : {}
   // Keep whatever the other mode already had (sets, weight) and fill only what is missing.
   const setMode = m => setC(x => ({ ...defaultConfig(ex.id, m), ...x, mode: m }))
   const save = () => {
@@ -537,12 +553,12 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   return <>
     <h3 className="capitalize">{ex.n}</h3>
     <Media ex={{ ...ex, gif: c.gifData || ex.gif }} />
-    <input ref={gifInput} type="file" accept="image/gif" hidden onChange={e => { readGif(e.target.files?.[0]); e.target.value = '' }} />
+    <input ref={gifInput} type="file" accept="image/gif,video/mp4,.gif,.mp4" hidden onChange={e => { readExerciseMedia(e.target.files?.[0], setGifData); e.target.value = '' }} />
     <div className="row" style={{ gap: 8, margin: '8px 0 12px' }}>
-      <Button icon="upload" variant="ghost" onClick={() => gifInput.current?.click()}>{c.gifData ? t('Change GIF') : t('Add a GIF')}</Button>
-      {c.gifData && <Button variant="ghost" onClick={() => setC(x => { const next = { ...x }; delete next.gifData; return next })}>{t('Remove GIF')}</Button>}
+      <Button icon="upload" variant="ghost" onClick={() => gifInput.current?.click()}>{c.gifData ? t('Change GIF or MP4') : t('Add GIF or MP4')}</Button>
+      {c.gifData && <Button variant="ghost" onClick={() => setC(x => { const next = { ...x }; delete next.gifData; return next })}>{t('Remove media')}</Button>}
     </div>
-    <div className="small dim" style={{ marginBottom: 12 }}>{t('GIF file, up to 1 MB. It will be saved with this exercise in the routine.')}</div>
+    <div className="small dim" style={{ marginBottom: 12 }}>{t('GIF or MP4, up to 1 MB. It will be saved with this exercise.')}</div>
     <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '10px 0 14px' }}>
       {cardio && <span className="tag acc"><Icon name="figureRun" />{t('Cardio')}</span>}
       <span className="tag">{t(ex.tg || ex.bp)}</span><span className="tag">{t(ex.eq)}</span>
