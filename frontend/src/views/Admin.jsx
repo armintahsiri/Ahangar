@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
@@ -22,6 +22,73 @@ const rel = ts => {
   return t('{0}d ago', Math.floor(s / 86400))
 }
 const dur = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return m < 60 ? t('{0} min', m) : t('{0}h {1}m', Math.floor(m / 60), m % 60) }
+const displayPhone = phone => {
+  if (!phone) return '—'
+  const local = phone.startsWith('+98') ? `0${phone.slice(3)}` : phone
+  return local
+}
+
+// Admin sets a member's password. The password is typed (or generated) by the admin on
+// purpose — it is a credential they will hand to the member in person, so the field is
+// plain text rather than masked, and no old password can be shown (they're hashed).
+function ResetPasswordSheet({ id, name, close }) {
+  const toast = useUI(s => s.toast)
+  const passwordInput = useRef(null)
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [busy, setBusy] = useState(false)
+  const generate = () => {
+    // digits 2-9 + letters without I/O — 32 symbols, no 0/O/1, readable aloud over the phone
+    const abc = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
+    const bytes = crypto.getRandomValues(new Uint8Array(10))
+    const p = Array.from(bytes, b => abc[b % 32]).join('')
+    setPw(p); setPw2(p)
+  }
+  const go = () => {
+    if (busy) return
+    if (pw.length < 8) { toast(t('Password must be at least 8 characters')); return }
+    if (pw !== pw2) { toast(t('Passwords do not match')); return }
+    setBusy(true)
+    api('/api/admin/user/password', { method: 'POST', body: JSON.stringify({ id, password: pw }) })
+      .then(() => { setPw(''); setPw2(''); toast(t('Password updated')); close() })
+      .catch(e => toast(e.message))
+      .finally(() => setBusy(false))
+  }
+  const copyPassword = async () => {
+    if (!pw) return
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pw)
+        toast(t('Password copied'))
+        return
+      }
+    } catch { /* HTTP/LAN origins may block the Clipboard API; try the browser copy command. */ }
+
+    const input = passwordInput.current
+    try {
+      input?.focus()
+      input?.select()
+      input?.setSelectionRange(0, input.value.length)
+      if (document.execCommand?.('copy')) {
+        toast(t('Password copied'))
+        return
+      }
+    } catch { /* Leave the password selected so the admin can copy it manually. */ }
+    toast(t('Copy unavailable — password selected'))
+  }
+  return <>
+    <h3>{t('New password for {0}', name)}</h3>
+    <div className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>{t('They will be signed out everywhere and must sign in with the new password.')}</div>
+    <input ref={passwordInput} className="input" type="text" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} maxLength={200} placeholder={t('Password')} value={pw} onChange={e => setPw(e.target.value)} />
+    <div style={{ height: 10 }} />
+    <input className="input" type="text" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} maxLength={200} placeholder={t('Confirm password')} value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') go() }} />
+    <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+      <Button size="sm" icon="reset" onClick={generate}>{t('Generate password')}</Button>
+      <Button size="sm" icon="copy" onClick={copyPassword} disabled={!pw}>{t('Copy password')}</Button>
+    </div>
+    <Button variant="primary" onClick={go} disabled={busy}>{t('Reset password')}</Button>
+  </>
+}
 
 function UserDetail({ id, users, meId, onChanged, close }) {
   const [d, setD] = useState(null)
@@ -66,6 +133,10 @@ function UserDetail({ id, users, meId, onChanged, close }) {
       {u.invitedBy && <span className="tag">{t('invite {0}', u.invitedBy)}</span>}
       <span className="tag">{t('joined {0}', u.created ? fmtDate(u.created.slice(0, 10)) : '—')}</span>
     </div>
+    <div className="row between" style={{ padding: '8px 2px', borderBottom: '1px solid var(--sep)' }}>
+      <span className="small muted">{t('Mobile number')}</span>
+      <b className="small" dir="ltr" style={{ fontVariantNumeric: 'tabular-nums' }}>{displayPhone(u.phone)}</b>
+    </div>
     <div className="tiles" style={{ textAlign: 'start' }}>
       <div className="tile"><div className="l">{t('Workouts')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.workouts.length}</div></div>
       <div className="tile"><div className="l">{t('Weigh-ins')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.bodyweight.length}</div></div>
@@ -88,6 +159,9 @@ function UserDetail({ id, users, meId, onChanged, close }) {
         .then(() => { toast(role === 'coach' ? t('Coach access enabled') : t('Coach access removed')); onChanged(); close() })
         .catch(e => toast(e.message))
     }}>{u.role === 'coach' ? t('Remove coach access') : t('Make coach')}</button>}
+    {/* password reset is member-only, like disable — an admin account is off-limits (server refuses too) */}
+    {!u.admin && !u.envAdmin && <button className="btn" style={{ margin: '8px 0 4px' }}
+      onClick={() => openSheet(pclose => <ResetPasswordSheet id={u.id} name={u.name} close={pclose} />)}>{t('Reset password')}</button>}
     {u.id !== meId && !u.envAdmin && <button className="btn" style={{ margin: '8px 0 4px' }} onClick={() => u.admin
       ? confirmSheet({ title: t('Remove admin from {0}?', u.name), message: t('They immediately lose access to this dashboard.'), confirmText: t('Remove admin'), danger: true, onConfirm: () => setAdmin(false) })
       : confirmSheet({ title: t('Make {0} an admin?', u.name), message: t("Admins can see every member's data, disable accounts, promote coaches and assign members to coaches."), confirmText: t('Make admin'), onConfirm: () => setAdmin(true) })
@@ -182,7 +256,10 @@ export default function Admin() {
     <div className="list">
       {(users || []).map(u => <div key={u.id} className="item" onClick={() => openUser(u.id)} style={u.disabled ? { opacity: .55 } : null}>
         <div className="grow"><div className="tt">{u.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)', display: 'inline-block', marginInlineStart: 5 }} />}{u.name} {u.admin && <span className="tag acc" style={{ marginInlineStart: 4 }}>{t('admin')}</span>}{!u.admin && u.role === 'coach' && <span className="tag" style={{ marginInlineStart: 4, color: 'var(--blue)' }}>{t('coach')}</span>}{!u.admin && u.role !== 'coach' && !u.coach && !u.disabled && <span className="tag" style={{ marginInlineStart: 4, color: 'var(--yellow)' }}>{t('no coach')}</span>}{u.disabled && <span className="tag" style={{ marginInlineStart: 4, color: 'var(--red)' }}>{t('off')}</span>}</div>
-          <div className="ss" style={{ color: 'var(--label)' }}>{u.live ? t('training now · {0}', u.live.name) : [t('{0} workouts', u.workouts), u.lastWorkout ? t('last {0}', fmtDate(u.lastWorkout)) : null, u.coach ? t('coach: {0}', u.coach.name) : null, t('synced {0}', rel(u.lastSync))].filter(Boolean).join(' · ')}</div></div>
+          <div className="ss" style={{ color: 'var(--label)' }}>
+            <div>{t('Mobile number')}: <b dir="ltr" style={{ unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums' }}>{displayPhone(u.phone)}</b></div>
+            <div>{u.live ? t('training now · {0}', u.live.name) : [t('{0} workouts', u.workouts), u.lastWorkout ? t('last {0}', fmtDate(u.lastWorkout)) : null, u.coach ? t('coach: {0}', u.coach.name) : null, t('synced {0}', rel(u.lastSync))].filter(Boolean).join(' · ')}</div>
+          </div></div>
         {u.hasPush && <Icon name="bell" title={t('push enabled')} style={{ fontSize: 15, color: 'var(--label-3)' }} />}<Icon name="chevronRight" className="chev" />
       </div>)}
       {users && !users.length && <div className="empty">{t('No users yet.')}</div>}

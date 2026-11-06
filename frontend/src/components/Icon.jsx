@@ -68,6 +68,7 @@ const P = {
 
   /* ---- actions ---- */
   plus: <path d="M12 5.2v13.6M5.2 12h13.6" />,
+  copy: <><rect x="8" y="8" width="11.5" height="12" rx="2" /><path d="M15.8 8V6.2a2 2 0 0 0-2-2H6.2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2H8" /></>,
   minus: <path d="M5.2 12h13.6" />,
   check: <path d="m4.8 12.6 4.8 4.8L19.2 6.8" />,
   checkCircle: <><circle cx="12" cy="12" r="8.2" /><path d="m8.2 12.2 2.7 2.7 5.1-5.4" /></>,

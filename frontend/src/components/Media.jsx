@@ -16,9 +16,10 @@ export default function Media({ ex, id, compact, minimizable }) {
   if (!ex.gif) return null
   const mini = minimizable && gifSize === 'mini'
   const toggleSize = e => { e.stopPropagation(); update(s => { s.gifSize = mini ? 'full' : 'mini' }) }
+  const still = ex.img ? imgSrc(ex) : gifSrc(ex)
   return (
     <div className={'exmedia' + (compact ? ' compact' : '') + (mini ? ' mini' : '')} id={id} onClick={() => setPlaying(p => !p)}>
-      <img decoding="async" src={playing ? gifSrc(ex) : imgSrc(ex)} alt={ex.n} />
+      <img decoding="async" src={playing ? gifSrc(ex) : still} alt={ex.n} />
       {minimizable && (
         <button className="giftoggle" onClick={toggleSize}>
           <Icon name={mini ? 'expand' : 'minimize'} />{mini ? t('Expand') : t('Minimize')}

@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { useUI } from '../store/useUI.js'
 
-// One bottom sheet (or centered dialog) with swipe-to-dismiss.
+// One bottom sheet (phone) or centered dialog (tablet/desktop) with swipe-to-dismiss.
 function Sheet({ sheet }) {
   const { closeSheet } = useUI()
   const ref = useRef(null)
   const drag = useRef({ startY: null, delta: 0 })
+  // from the tablet breakpoint up the sheet is a centered dialog, so the drag
+  // gesture would shove it off-centre — sheets are short-lived, so checking the
+  // width once at mount (no listener) is enough
+  const draggable = window.matchMedia('(max-width: 767px)').matches
 
   const onTouchStart = e => {
     const el = ref.current
@@ -39,7 +43,7 @@ function Sheet({ sheet }) {
   // non-passive touchmove so preventDefault works (bottom sheets only; centered dialogs have no ref)
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || !draggable) return
     el.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => el.removeEventListener('touchmove', onTouchMove)
   }, [])
@@ -56,7 +60,9 @@ function Sheet({ sheet }) {
   return (
     <div>
       <div className="mback" onClick={() => { if (!sheet.locked) close() }} />
-      <div className="sheet" ref={ref} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div className="sheet" ref={ref}
+        onTouchStart={draggable ? onTouchStart : undefined}
+        onTouchEnd={draggable ? onTouchEnd : undefined}>
         <div className="grab" />
         {sheet.render(close)}
       </div>

@@ -483,7 +483,7 @@ const routes = {
       const workouts = S.workouts || [];
       const last = workouts[workouts.length - 1];
       return {
-        id: u.id, name: u.name, created: u.created || null,
+        id: u.id, name: u.name, phone: u.phone || null, created: u.created || null,
         disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null,
         coach: isCoach(u) || isAdmin(u) ? null : coachOf(u.id),
         workouts: workouts.length,
@@ -504,7 +504,7 @@ const routes = {
     if (!u) return json(res, 404, { error: 'no such user' });
     const S = readState(u.id) || {};
     json(res, 200, {
-      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null, coach: coachOf(u.id) },
+      user: { id: u.id, name: u.name, phone: u.phone || null, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null, coach: coachOf(u.id) },
       unit: S.unit || 'kg',
       lastSync: S._ts || null,
       routines: (S.routines || []).map(r => ({ id: r.id, name: r.name, emoji: r.emoji, count: (r.ex || []).length })),
@@ -590,6 +590,25 @@ const routes = {
     json(res, 200, { user: publicUser(u) });
   },
 
+  // Admin sets a member's password. Passwords are one-way hashed (scrypt), so there is
+  // nothing to "recover" — this writes a replacement. Admins are refused outright, same as
+  // disable/role: an ordinary admin must not be able to take over the owner account, and
+  // the env var would re-admin ADMIN_UIDS entries anyway. The sv bump kills the member's
+  // live sessions (same mechanism as logout/all), so they re-sign-in with the new password.
+  'POST /api/admin/user/password': async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u) return json(res, 404, { error: 'no such user' });
+    if (isAdmin(u)) return json(res, 400, { error: 'cannot reset an admin password' });
+    if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 200)
+      return json(res, 400, { error: 'password must be at least 8 characters' });
+    u.password = passwordRecord(body.password);
+    u.sv = (u.sv || 0) + 1;
+    saveDb();
+    json(res, 200, { ok: true, id: u.id });
+  },
+
   'GET /api/coach/clients': async (req, res) => {
     const coach = requireCoach(req, res); if (!coach) return;
     const links = db.coachLinks.filter(x => x.coachId === coach.id && x.active !== false);
@@ -613,6 +632,8 @@ const routes = {
     if (!u) return json(res, 404, { error: 'no such user' });
     const S = readState(id) || {};
     json(res, 200, { user: { id: u.id, name: u.name, disabled: !!u.disabled, created: u.created || null },
+      // the client's own body preference drives which anatomy the muscle map draws
+      body: S.body || 'male',
       workouts: (S.workouts || []).slice().reverse(), assignment: db.coachAssignments.find(x => x.coachId === coach.id && x.memberId === id) || null });
   },
 

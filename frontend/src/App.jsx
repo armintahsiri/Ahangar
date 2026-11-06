@@ -72,24 +72,27 @@ function Shell() {
   return (
     <>
       {/* keyed on the route: a view that throws is contained, and switching tabs
-          re-mounts the boundary, so the tab bar is always a way out */}
-      <div id="app" className="vfade" key={loc.pathname}>
+          re-mounts the boundary, so the tab bar is always a way out. `.appc` caps
+          the content width and centres it in the space left of the desktop sidebar. */}
+      <div id="app" className={'vfade' + (!authed ? ' unauth' : '')} key={loc.pathname}>
         <ErrorBoundary>
-          {!authed ? <Login /> : (
-            <Routes>
-              <Route path="/home" element={<Home />} />
-              <Route path="/plan" element={<Plan />} />
-              <Route path="/plan/r/:id" element={<RoutineEdit />} />
-              <Route path="/workout" element={<Workout />} />
-              <Route path="/stats" element={<Stats />} />
-              <Route path="/history" element={<History />} />
-              <Route path="/library" element={<Library />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/admin" element={user?.admin ? <Admin /> : <Navigate to="/home" replace />} />
-              <Route path="/coach" element={user?.admin || user?.role === 'coach' ? <Coach /> : <Navigate to="/home" replace />} />
-              <Route path="*" element={<Navigate to="/home" replace />} />
-            </Routes>
-          )}
+          <div className="appc">
+            {!authed ? <Login /> : (
+              <Routes>
+                <Route path="/home" element={<Home />} />
+                <Route path="/plan" element={<Plan />} />
+                <Route path="/plan/r/:id" element={<RoutineEdit />} />
+                <Route path="/workout" element={<Workout />} />
+                <Route path="/stats" element={<Stats />} />
+                <Route path="/history" element={<History />} />
+                <Route path="/library" element={<Library />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/admin" element={user?.admin ? <Admin /> : <Navigate to="/home" replace />} />
+                <Route path="/coach" element={user?.admin || user?.role === 'coach' ? <Coach /> : <Navigate to="/home" replace />} />
+                <Route path="*" element={<Navigate to="/home" replace />} />
+              </Routes>
+            )}
+          </div>
         </ErrorBoundary>
       </div>
       <TabBar onStart={startFlow} />

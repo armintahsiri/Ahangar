@@ -484,6 +484,7 @@ function ProgressionFields({ ex, mode, c, setC, routine, unit }) {
 
 function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   const st = useStore(s => s.S)
+  const gifInput = useRef(null)
   const cardio = isCardio(ex.id)
   const [c, setC] = useState(existing || defaultConfig(ex.id))
   // Cardio keeps its own duration+speed form; the reps/time choice (issue #16) is offered for
@@ -492,6 +493,16 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   // Both default from the dataset and are then whatever the config says — see isBw.
   const bw = !cardio && isBw({ ...c, id: ex.id })
   const perSide = isPerSide(c)
+  const readGif = file => {
+    if (!file) return
+    if (file.type !== 'image/gif') { toast(t('Choose a GIF file')); return }
+    if (file.size > 1000000) { toast(t('GIF must be 1 MB or smaller')); return }
+    const reader = new FileReader()
+    reader.onload = () => setC(x => ({ ...x, gifData: String(reader.result) }))
+    reader.onerror = () => toast(t('Could not read GIF'))
+    reader.readAsDataURL(file)
+  }
+  const mediaCfg = c.gifData ? { gifData: c.gifData } : {}
   // Keep whatever the other mode already had (sets, weight) and fill only what is missing.
   const setMode = m => setC(x => ({ ...defaultConfig(ex.id, m), ...x, mode: m }))
   const save = () => {
@@ -509,14 +520,14 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     // rather than carrying a flag nothing downstream can read.
     const flags = {}
     if (bw !== isBodyweightEq(ex.id)) flags.bodyweight = bw
-    if (cardio) onSave({ sets, min: Math.max(1, Math.round(c.min) || 20), speed: Math.max(0, c.speed || 8) })
-    else if (mode === 'time') onSave({ sets, mode: 'time', sec: Math.max(1, Math.round(c.sec) || 45), weight: Math.max(0, c.weight || 0), ...flags, ...prog })
+    if (cardio) onSave({ sets, min: Math.max(1, Math.round(c.min) || 20), speed: Math.max(0, c.speed || 8), ...mediaCfg })
+    else if (mode === 'time') onSave({ sets, mode: 'time', sec: Math.max(1, Math.round(c.sec) || 45), weight: Math.max(0, c.weight || 0), ...flags, ...prog, ...mediaCfg })
     else {
       // A unilateral target is stored even: the split has to divide, and a typed 15 would
       // otherwise plan seven reps on one side and eight on the other, every session.
       const typed = Math.max(1, Math.round(c.reps) || 10)
       const reps = perSide ? Math.ceil(typed / 2) * 2 : typed
-      const out = { sets, mode: 'reps', reps, weight: Math.max(0, c.weight || 0), ...flags, ...(perSide ? { side: true } : {}), ...prog }
+      const out = { sets, mode: 'reps', reps, weight: Math.max(0, c.weight || 0), ...flags, ...(perSide ? { side: true } : {}), ...prog, ...mediaCfg }
       if (policyFor({ ...c, id: ex.id }, routine, 'reps') === 'double') out.repsMin = Math.min(reps, Math.max(1, Math.round(c.repsMin) || Math.max(1, reps - 2)))
       // A ceiling below the working reps would tell you to add a set on day one.
       if (bw && !(out.weight > 0) && c.repsMax > 0) out.repsMax = Math.max(reps, Math.round(c.repsMax))
@@ -525,7 +536,13 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   }
   return <>
     <h3 className="capitalize">{ex.n}</h3>
-    <Media ex={ex} />
+    <Media ex={{ ...ex, gif: c.gifData || ex.gif }} />
+    <input ref={gifInput} type="file" accept="image/gif" hidden onChange={e => { readGif(e.target.files?.[0]); e.target.value = '' }} />
+    <div className="row" style={{ gap: 8, margin: '8px 0 12px' }}>
+      <Button icon="upload" variant="ghost" onClick={() => gifInput.current?.click()}>{c.gifData ? t('Change GIF') : t('Add a GIF')}</Button>
+      {c.gifData && <Button variant="ghost" onClick={() => setC(x => { const next = { ...x }; delete next.gifData; return next })}>{t('Remove GIF')}</Button>}
+    </div>
+    <div className="small dim" style={{ marginBottom: 12 }}>{t('GIF file, up to 1 MB. It will be saved with this exercise in the routine.')}</div>
     <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '10px 0 14px' }}>
       {cardio && <span className="tag acc"><Icon name="figureRun" />{t('Cardio')}</span>}
       <span className="tag">{t(ex.tg || ex.bp)}</span><span className="tag">{t(ex.eq)}</span>
@@ -767,19 +784,40 @@ export const workoutDetailSheet = w => ui().openSheet(close => <WorkoutDetail w=
 /* ============================ calendar ============================ */
 function Calendar({ start, close }) {
   const st = useStore(s => s.S)
-  const [cur, setCur] = useState(() => { const d = start ? new Date(start) : new Date(); d.setDate(1); return d })
-  const y = cur.getFullYear(), mo = cur.getMonth()
+  const persian = st.lang === 'fa'
+  const persianDate = new Intl.DateTimeFormat('fa-IR-u-ca-persian-nu-latn', {
+    year: 'numeric', month: 'long', day: 'numeric',
+  })
+  const jalaliParts = date => {
+    const parts = Object.fromEntries(persianDate.formatToParts(date).map(p => [p.type, p.value]))
+    return { year: parts.year, month: parts.month, day: Number(parts.day) }
+  }
+  const monthStart = date => {
+    const d = new Date(date)
+    if (persian) {
+      for (let i = 0; i < 32 && jalaliParts(d).day !== 1; i++) d.setDate(d.getDate() - 1)
+    } else d.setDate(1)
+    return d
+  }
+  const [cur, setCur] = useState(() => monthStart(start ? new Date(start + 'T12:00:00') : new Date()))
+  const shown = persian ? jalaliParts(cur) : { year: cur.getFullYear(), month: MONTHS_LONG[cur.getMonth()] }
   const byDay = {}
   st.workouts.forEach(w => (byDay[w.d] = byDay[w.d] || []).push(w))
-  const startOffset = (new Date(y, mo, 1).getDay() + 6) % 7
-  const daysIn = new Date(y, mo + 1, 0).getDate()
-  const monthWs = st.workouts.filter(w => w.d.startsWith(y + '-' + String(mo + 1).padStart(2, '0')))
-  const monthVol = monthWs.reduce((a, w) => a + (w.vol || 0), 0)
-  const monthMs = monthWs.reduce((a, w) => a + Math.max(0, (w.end || w.start) - w.start), 0)
+  const startOffset = persian ? (cur.getDay() + 1) % 7 : (cur.getDay() + 6) % 7
+  let daysIn
+  if (persian) {
+    for (daysIn = 1; daysIn <= 31; daysIn++) {
+      const probe = new Date(cur)
+      probe.setDate(cur.getDate() + daysIn)
+      const p = jalaliParts(probe)
+      if (p.year !== shown.year || p.month !== shown.month) break
+    }
+  } else daysIn = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate()
   const cells = []
   for (let i = 0; i < startOffset; i++) cells.push(<div key={'e' + i} />)
   for (let d = 1; d <= daysIn; d++) {
-    const iso = y + '-' + String(mo + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0')
+    const date = new Date(cur); date.setDate(cur.getDate() + d - 1)
+    const iso = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
     const ws = byDay[iso], effId = effectiveRoutineId(st, iso), ovr = st.dayPlan[iso] !== undefined
     const dotCls = ws ? 'done' : ovr && effId ? 'ovr' : effId ? 'plan' : ''
     cells.push(<button key={d} className={'cal-d' + (ws ? ' has' : '') + (iso === todayISO() ? ' today' : '')} onClick={() => {
@@ -790,12 +828,11 @@ function Calendar({ start, close }) {
   }
   return <>
     <div className="row between" style={{ marginBottom: 2 }}>
-      <button className="iconbtn" onClick={() => setCur(new Date(y, mo - 1, 1))} aria-label="Previous month"><Icon name="chevronLeft" /></button>
-      <h3 style={{ margin: 0 }}>{t(MONTHS_LONG[mo])} {y}</h3>
-      <button className="iconbtn" onClick={() => setCur(new Date(y, mo + 1, 1))} aria-label="Next month"><Icon name="chevronRight" /></button>
+      <button className="iconbtn" onClick={() => { const d = new Date(cur); d.setDate(d.getDate() - 35); setCur(monthStart(d)) }} aria-label="Previous month"><Icon name="chevronLeft" /></button>
+      <h3 style={{ margin: 0 }}>{shown.month} {shown.year}</h3>
+      <button className="iconbtn" onClick={() => { const d = new Date(cur); d.setDate(d.getDate() + 35); setCur(monthStart(d)) }} aria-label="Next month"><Icon name="chevronRight" /></button>
     </div>
-    <div className="small muted" style={{ textAlign: 'center' }}>{monthWs.length ? `${t(monthWs.length === 1 ? '{0} workout' : '{0} workouts', monthWs.length)} · ${fmtDur(monthMs)} · ${fmtVol(monthVol, st.unit)}` : t('No workouts this month')}</div>
-    <div className="cal-grid">{['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(l => <div key={l} className="cal-h">{t(l)}</div>)}{cells}</div>
+    <div className="cal-grid">{(persian ? ['Sa', 'Su', 'Mo', 'Tu', 'We', 'Th', 'Fr'] : ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']).map(l => <div key={l} className="cal-h">{t(l)}</div>)}{cells}</div>
     <div className="cal-legend">
       <span><i style={{ background: 'var(--acc)' }} />{t('Trained')}</span>
       <span><i style={{ background: 'var(--label-3)' }} />{t('Planned')}</span>
@@ -955,7 +992,8 @@ function doFinishWorkout() {
     // For coach-assigned sessions, retain every prescribed exercise and unchecked set in the
     // member's report, including exercises they skipped completely. This lets the coach see
     // partial completion without turning the report into something the coach can edit.
-    entries: A.entries.map(e => ({ id: e.id, sets: e.sets, topW: e.topW || null, target: e.target || null }))
+    entries: A.entries.map(e => ({ id: e.id, sets: e.sets, topW: e.topW || null,
+      target: e.target ? Object.fromEntries(Object.entries(e.target).filter(([key]) => key !== 'gifData')) : null }))
       .filter(e => A.coachProgramVersion || e.sets.some(s => s.done)),
     coachProgramVersion: A.coachProgramVersion || null,
     prs

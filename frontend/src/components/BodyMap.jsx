@@ -26,11 +26,16 @@ function useBodyPaths() {
   return paths
 }
 
-function View({ view, levels, onMuscle, selected }) {
+function View({ view, levels, onMuscle, selected, body }) {
+  const headTransform = view.vb.startsWith('0 0')
+    ? 'translate(325 245) scale(.94) translate(-325 -245)'
+    : 'translate(1148 280) scale(.94) translate(-1148 -280)'
   return (
     <svg className="bm-v" viewBox={view.vb} role="img">
-      {INERT.map(slug => (view.p[slug] || []).map((d, i) =>
-        <path key={slug + i} className="bm-sil" d={d} />))}
+      {INERT.map(slug => <g key={slug}
+        transform={body === 'female' && (slug === 'head' || slug === 'hair') ? headTransform : undefined}>
+        {(view.p[slug] || []).map((d, i) => <path key={i} className="bm-sil" d={d} />)}
+      </g>)}
       {MUSCLES.map(slug => (view.p[slug] || []).map((d, i) =>
         <path
           key={slug + i}
@@ -54,10 +59,10 @@ export default function BodyMap({ load = {}, body = 'male', onMuscle, selected, 
   const levels = levelsOf(load)
   const g = paths && (paths[body] || paths.male)
   return (
-    <div className={'bodymap ' + className}>
+    <div className={'bodymap' + (body === 'female' ? ' female' : '') + ' ' + className}>
       {g ? <>
-        <View view={g.front} levels={levels} onMuscle={onMuscle} selected={selected} />
-        <View view={g.back} levels={levels} onMuscle={onMuscle} selected={selected} />
+        <View view={g.front} levels={levels} onMuscle={onMuscle} selected={selected} body={body} />
+        <View view={g.back} levels={levels} onMuscle={onMuscle} selected={selected} body={body} />
       </> : <div className="bm-ph" aria-hidden="true" />}
     </div>
   )

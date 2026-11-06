@@ -6,27 +6,41 @@ import { useUI } from '../store/useUI.js'
 import { DAYN } from '../lib/format.js'
 import { EXIDX } from '../lib/exercises.js'
 import { setLabel } from '../lib/history.js'
+import { loadOfRoutine, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
 import { t } from '../lib/i18n.js'
 import Icon from '../components/Icon.jsx'
+import BodyMap from '../components/BodyMap.jsx'
+import MuscleBalance from '../components/MuscleBalance.jsx'
 import { Button } from '../components/ui.jsx'
 import { exCount } from '../lib/format.js'
 
-const DAYS = [1, 2, 3, 4, 5, 6, 0]
+const DAYS = [6, 0, 1, 2, 3, 4, 5]
 const emptyWeek = () => Object.fromEntries(DAYS.map(d => [String(d), 'rest']))
 
 export default function Coach() {
   const nav = useNavigate()
   const user = useStore(s => s.user)
-  const allRoutines = useStore(s => s.S.routines)
-  const routines = allRoutines.filter(r => !r.coachManaged)
   const toast = useUI(s => s.toast)
   const [clients, setClients] = useState([])
   const [selected, setSelected] = useState('')
-  const [sourceRoutine, setSourceRoutine] = useState('')
-  const [day, setDay] = useState('1')
   const [detail, setDetail] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [mapDay, setMapDay] = useState('')
+  const [showWholeProgram, setShowWholeProgram] = useState(false)
   const selectedClient = useMemo(() => clients.find(c => c.id === selected) || null, [clients, selected])
+  const wholeProgramExercises = selectedClient ? DAYS.flatMap(d => {
+    const id = selectedClient.assignment?.week?.[String(d)]
+    return selectedClient.assignment?.routines?.find(r => r.id === id)?.ex || []
+  }) : []
+  const wholeProgramLoad = loadOfRoutine({ ex: wholeProgramExercises })
+  const { worked: wholeProgramWorked } = rankOf(wholeProgramLoad)
+  useEffect(() => {
+    const firstTrainingDay = selectedClient && DAYS.find(d => {
+      const id = selectedClient.assignment?.week?.[String(d)]
+      return selectedClient.assignment?.routines?.some(r => r.id === id)
+    })
+    setMapDay(firstTrainingDay == null ? '' : String(firstTrainingDay))
+  }, [selected])
 
   const reload = async (keep = selected) => {
     try {
@@ -57,24 +71,13 @@ export default function Coach() {
     finally { setBusy(false) }
   }
 
-  const assign = async () => {
-    const source = routines.find(r => r.id === sourceRoutine)
-    if (!source || !selectedClient) return
+  const setDayRoutine = async (dayKey, value) => {
+    if (!selectedClient) return
     const current = selectedClient.assignment || { routines: [], week: {} }
-    const assignedId = 'coach-' + source.id
-    const nextRoutines = [...(current.routines || []).filter(r => r.id !== assignedId), {
-      id: assignedId, name: source.name, emoji: source.emoji, prog: source.prog, ex: source.ex.map(e => ({ ...e }))
-    }]
-    const nextWeek = { ...emptyWeek(), ...(current.week || {}), [day]: assignedId }
-    await saveAssignment({ routines: nextRoutines, week: nextWeek })
-  }
-
-  const unassign = async dayKey => {
-    if (!selectedClient?.assignment) return
-    const current = selectedClient.assignment
-    const nextWeek = { ...emptyWeek(), ...(current.week || {}), [dayKey]: 'rest' }
-    const used = new Set(Object.values(nextWeek).filter(id => id && id !== 'rest'))
-    await saveAssignment({ routines: (current.routines || []).filter(r => used.has(r.id)), week: nextWeek })
+    const nextWeek = { ...emptyWeek(), ...(current.week || {}), [dayKey]: value || 'rest' }
+    // Keep the client's private routine library even when a routine is removed from
+    // the weekly schedule. Each assignment record is scoped to this member on the API.
+    await saveAssignment({ routines: [...(current.routines || [])], week: nextWeek })
   }
 
   if (!user?.admin && user?.role !== 'coach') return null
@@ -90,42 +93,77 @@ export default function Coach() {
     </div>
 
     <h4 className="sec">{t('My clients')}</h4>
-    {clients.length ? <div className="list">{clients.map(c => <div key={c.id} className={'item' + (selected === c.id ? ' selected' : '')} onClick={() => setSelected(c.id)}>
+    {clients.length ? <div className="list">{clients.map(c => <div key={c.id} className={'item coach-client' + (selected === c.id ? ' selected' : '')} onClick={() => { setSelected(c.id); setShowWholeProgram(false) }}>
       <span className="lrow-i"><Icon name="person" /></span>
       <div className="grow"><div className="tt">{c.name}</div><div className="ss">{c.workouts} {t('workouts')} · {c.assignment?.routines?.length || 0} {t('assigned routines')}</div></div>
+      {selected === c.id && <span className="tag acc">{t('Selected')}</span>}
       {c.disabled && <span className="tag">{t('Disabled')}</span>}
     </div>)}</div> : <div className="empty">{t('No clients yet — the gym owner assigns members to you.')}</div>}
 
     {selectedClient && <>
-      <div className="row between" style={{ marginTop: 20 }}><h4 className="sec" style={{ margin: 0 }}>{t('Program for {0}', selectedClient.name)}</h4><Button size="sm" onClick={() => nav('/plan')}>{t('My templates')}</Button></div>
-      <div className="card">
-        <div className="muted small">{t('Create or edit a routine in My Plan, then assign a separate snapshot to this client. Later edits to your template do not change the client’s assigned plan.')}</div>
-        <div style={{ height: 12 }} />
-        {routines.length ? <>
-          <select className="input" value={sourceRoutine} onChange={e => setSourceRoutine(e.target.value)}>
-            <option value="">{t('Choose a routine template')}</option>
-            {routines.map(r => <option value={r.id} key={r.id}>{r.name}</option>)}
-          </select>
-          <div style={{ height: 8 }} />
-          <select className="input" value={day} onChange={e => setDay(e.target.value)}>
-            {DAYS.map(d => <option value={String(d)} key={d}>{t(DAYN[d])}</option>)}
-          </select>
-          <div style={{ height: 10 }} />
-          <Button variant="primary" icon="check" disabled={!sourceRoutine || busy} onClick={assign}>{t('Assign routine to this day')}</Button>
-        </> : <div className="small muted">{t('Create a routine in My Plan before assigning one.')}</div>}
+      <div className="card" style={{ marginTop: 20, border: '1px solid var(--sep)' }}>
+        <div className="row between" style={{ gap: 12 }}>
+          <div className="row" style={{ gap: 10, minWidth: 0 }}>
+            <span className="lrow-i" style={{ background: 'var(--surface-2)', color: 'var(--label-2)' }}><Icon name="person" /></span>
+            <div className="coach-overall-toggle">
+              <span style={{ minWidth: 0 }}>
+                <span className="small muted">{t('Currently viewing')}</span>
+                <span className="coach-overall-name">{selectedClient.name}</span>
+              </span>
+            </div>
+          </div>
+          <Button size="sm" onClick={() => nav('/plan')}>{t('My routine library')}</Button>
+        </div>
+        <div className="small muted" style={{ marginTop: 10 }}>{t('Each routine copied here belongs only to this person. Changes for another person stay separate.')}</div>
       </div>
-
       <h4 className="sec">{t('Assigned weekly plan')}</h4>
       <div className="list">{DAYS.map(d => {
         const id = selectedClient.assignment?.week?.[String(d)]
         const routine = selectedClient.assignment?.routines?.find(r => r.id === id)
-        return <div className="item" key={d}>
-          <div className="grow"><div className="tt">{t(DAYN[d])}</div><div className="ss">{routine ? `${routine.name} · ${exCount(routine.ex.length)}` : t('Rest')}</div></div>
-          {routine && <button className="iconbtn" aria-label={t('Remove assignment')} onClick={() => unassign(String(d))}><Icon name="trash" /></button>}
+        const dayKey = String(d)
+        return <div key={d}>
+          <div className={'item coach-day-row' + (mapDay === dayKey ? ' active' : '')}>
+          <button className="grow coach-day-toggle" disabled={!routine} aria-pressed={mapDay === dayKey && !showWholeProgram} onClick={() => { setMapDay(dayKey); setShowWholeProgram(false) }}>
+            <span><span className="tt">{t(DAYN[d])}</span><span className="ss">{routine ? `${routine.name} · ${exCount(routine.ex.length)}` : t('Rest')}</span></span>
+            {routine && mapDay === dayKey && <Icon name="check" style={{ color: 'var(--acc)' }} />}
+          </button>
+          <div style={{ position: 'relative', width: 'auto', maxWidth: '52%' }}>
+            <select className="input" style={{ width: '100%', appearance: 'none', paddingLeft: 38, direction: 'rtl', textAlign: 'center' }} value={id && id !== 'rest' ? id : ''} disabled={busy} aria-label={t(DAYN[d])}
+              onChange={e => { setMapDay(String(d)); setShowWholeProgram(false); setDayRoutine(String(d), e.target.value) }}>
+              <option value="">{t('Rest')}</option>
+              {(selectedClient.assignment?.routines || []).map(r => <option value={r.id} key={r.id}>{r.name}</option>)}
+            </select>
+            <Icon name="chevronDown" style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--label-2)' }} />
+          </div>
+          </div>
         </div>
       })}</div>
+      <div className="row" style={{ marginTop: 10, gap: 8 }}>
+        <Button size="sm" onClick={() => nav('/plan')}>{t('Edit my routine library')}</Button>
+        <span className="small muted">{t('Changes save automatically.')}</span>
+      </div>
+
+      {wholeProgramWorked.length > 0 && (() => {
+        const routineId = mapDay ? selectedClient.assignment?.week?.[mapDay] : null
+        const mapRoutine = selectedClient.assignment?.routines?.find(r => r.id === routineId)
+        const dayLoad = mapRoutine ? loadOfRoutine(mapRoutine) : {}
+        const { worked: dayWorked } = rankOf(dayLoad)
+        const load = showWholeProgram ? wholeProgramLoad : dayLoad
+        const worked = showWholeProgram ? wholeProgramWorked : dayWorked
+        return <div className="card" style={{ marginTop: 14 }}>
+          <div className="row between" style={{ gap: 10 }}>
+            <h2 style={{ margin: 0 }}>{showWholeProgram ? t('Whole weekly plan') : t('Muscles worked on {0}', t(DAYN[Number(mapDay)]))}</h2>
+            <Button size="sm" onClick={() => setShowWholeProgram(v => !v)}>{showWholeProgram ? t('Show selected day') : t('Show whole program')}</Button>
+          </div>
+          {worked.length > 0 ? <>
+            <BodyMap load={load} body={detail?.body || 'male'} />
+            <div className="mchips" style={{ marginTop: 8 }}>{worked.map(m => <span key={m} className="mchip acc">{t(MUSCLE_NAME[m])}</span>)}</div>
+          </> : <div className="small muted" style={{ marginTop: 12 }}>{t('No exercises in this weekly plan yet.')}</div>}
+        </div>
+      })()}
 
       <h4 className="sec">{t('Member workout reports')}</h4>
+      {detail?.workouts?.length > 0 && <MuscleBalance workouts={detail.workouts} body={detail.body} />}
       <div className="card">
         {!detail ? <div className="small muted">{t('Loading reports…')}</div> : detail.workouts?.length ? detail.workouts.slice(0, 8).map(w => {
           const done = w.entries?.reduce((n, e) => n + (e.sets || []).filter(s => s.done).length, 0) || 0

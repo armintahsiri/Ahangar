@@ -51,6 +51,7 @@
   /* geometry */
   --r-sm:8px; --r:12px; --r-lg:16px; --r-xl:22px; --r-card:14px;
   --pad:16px;
+  --sbw:232px;   /* desktop sidebar width */
   --icon-stroke:1.7;
 
   /* motion */
@@ -165,6 +166,10 @@ button,.chip,.tile,.item,.wday,.cal-d,.swatch,.hm-c,.lrow,.seg button,.stp butto
   padding:calc(var(--sat) + 8px) var(--pad) calc(128px + var(--sab));
   max-width:560px;margin:0 auto;
 }
+/* The signed-out screen has no tab bar or sidebar reserving space; centre its
+   content in the full viewport on both axes. */
+#app.unauth{display:flex;align-items:center;justify-content:center;min-height:100vh;padding-block:24px}
+#app.unauth .appc{width:100%}
 /* while the rest timer floats above the tab bar, keep its height scrollable-past
    (the rest variant is two rows tall — ~44px more than the single-row work timer) */
 body.resting #app{padding-bottom:calc(250px + var(--sab))}
@@ -330,6 +335,8 @@ h4.sec{
 .wday .dot.ovr{background:var(--orange)}
 .wday .dot.done{background:var(--acc)}
 .wday:active{background:var(--surface-2)}
+.wday.selected:not(.today){background:var(--acc-soft)}
+.wday.selected .num{color:var(--acc);font-weight:600}
 .wday.today .num{
   background:var(--acc);color:var(--on-acc);font-weight:600;
   width:31px;height:31px;border-radius:50%;display:flex;align-items:center;
@@ -344,6 +351,16 @@ h4.sec{
   transition:background var(--fast);text-align:left;width:100%;
 }
 .item:active{background:var(--surface-2)}
+.coach-client{cursor:pointer}
+.coach-client.selected{background:var(--acc-soft);box-shadow:inset -3px 0 var(--acc)}
+.coach-overall-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;flex:1;min-width:0;text-align:start}
+.coach-overall-name{display:block;margin-top:2px;font-size:20px;font-weight:650;line-height:1.25;overflow-wrap:anywhere}
+.coach-day-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0;text-align:start;min-width:0}
+.coach-day-row.active{background:var(--acc-soft);box-shadow:inset -3px 0 var(--acc)}
+.coach-day-toggle>span{min-width:0}
+.coach-day-toggle .tt,.coach-day-toggle .ss{display:block}
+.coach-day-toggle:disabled{cursor:default;opacity:1}
+.coach-muscle-detail{margin-top:12px}
 .thumb{width:50px;height:50px;border-radius:9px;object-fit:cover;background:#fff;flex:none}
 .thumb-x{
   display:flex;align-items:center;justify-content:center;font-size:21px;
@@ -770,6 +787,9 @@ h4.sec{
   --bm-base:color-mix(in srgb,var(--label) 11%,var(--surface));
 }
 .bm-v{flex:1;min-width:0;height:auto;max-height:min(46vh,340px)}
+/* The female reference artwork uses a taller, narrower viewBox than the male one.
+   Widen its rendered figure so both body types read at a comparable visual size. */
+.bodymap.female .bm-v{transform:scaleX(1.2);transform-origin:center}
 .bm-ph{height:200px}                       /* holds the space while the geometry loads */
 .bm-sil{fill:color-mix(in srgb,var(--label) 18%,var(--surface))}
 .bm-m{fill:var(--bm-base);transition:fill var(--med) var(--ease)}
@@ -911,15 +931,21 @@ h4.sec{
 [dir="rtl"] .icn[data-icon="chevronLeft"],
 [dir="rtl"] .icn[data-icon="chevronRight"]{transform:scaleX(-1)}
 
-/* --------------------------------------------------- desktop (≥1000px) --- */
+/* ----------------------------------------------------------------------------
+   responsive tiers — the phone layout below 768px is the baseline (and the
+   Capacitor build); tablets get a wider column with centered dialogs, and the
+   desktop tier swaps the bottom tab bar for a persistent sidebar. Both tiers
+   are pure CSS: both navs stay mounted and the viewport picks one.
+   ------------------------------------------------------------------------- */
 .cols{display:block}
-@media (min-width:1000px){
-  #app{max-width:1080px;padding-top:32px}
+/* the desktop nav only exists from 1024px up — below that it must not paint at all */
+#sidebar{display:none}
+
+/* ------------------------------------------------------ tablet (≥768px) --- */
+@media (min-width:768px){
+  #app{max-width:720px;padding-top:28px}
   .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
   .cols>*{min-width:0}
-  #app .list{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  #modal-root .list,.narrow .list{display:flex;flex-direction:column}
-  .narrow{max-width:640px;margin:0 auto}
   .tiles{grid-template-columns:repeat(4,1fr)}
   .cols .tiles{grid-template-columns:1fr 1fr}
   #tabbar{
@@ -928,12 +954,97 @@ h4.sec{
     padding:7px 10px 9px;box-shadow:0 12px 40px -10px rgba(0,0,0,.5);
   }
   #tabbar button.start{margin-top:-26px}
-  .sheet{left:50%;right:auto;margin-left:-320px;width:640px;border-radius:var(--r-xl) var(--r-xl) 0 0}
+  /* the bottom sheet becomes a centered dialog — a phone gesture has no place here */
+  .sheet{
+    left:50%;right:auto;top:50%;bottom:auto;transform:translate(-50%,-50%);
+    width:min(560px,calc(100vw - 48px));max-height:86vh;
+    border-radius:var(--r-xl);padding:20px 22px calc(22px + var(--sab));
+    box-shadow:0 24px 80px -12px rgba(0,0,0,.5);
+    animation:pop .28s var(--ease);
+  }
+  .sheet .grab{display:none}
   .center{width:340px}
-  #timer{left:50%;right:auto;margin-left:-260px;width:520px;bottom:112px}
-  /* 520px fits the clock, the bar and all three controls on one line again */
+  /* 520px+ fits the clock, the bar and all three rest-timer controls on one line */
   #timer.rest{flex-direction:row;align-items:center;gap:14px}
   #timer.rest .head{flex:1;min-width:0}
-  .exmedia img{height:380px}
   .hm-wrap{display:flex;flex-direction:column;align-items:center}
+  #modal-root .list{display:flex;flex-direction:column}
+}
+
+/* ----------------------------------------------------- desktop (≥1024px) --- */
+@media (min-width:1024px){
+  #sidebar{
+    display:flex;flex-direction:column;gap:2px;
+    position:fixed;top:0;bottom:0;inset-inline-start:0;width:var(--sbw);z-index:50;
+    padding:22px 12px 14px;
+    background:color-mix(in srgb,var(--bg-el) 86%,transparent);
+    backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);
+    border-inline-end:var(--hair) solid var(--sep-op);
+    overflow-y:auto;overscroll-behavior:contain;
+  }
+  .sb-brand{
+    display:flex;align-items:center;gap:10px;
+    padding:2px 10px 14px;font-size:17px;font-weight:600;letter-spacing:-.012em;
+  }
+  .sb-brand .icn{font-size:23px;color:var(--acc);--icon-stroke:1.8}
+  .sb-brand span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sb-item{
+    display:flex;align-items:center;gap:12px;width:100%;text-align:start;
+    padding:9px 11px;border-radius:10px;color:var(--label-2);font-size:15px;
+    letter-spacing:-.006em;transition:background var(--fast),color var(--fast);
+  }
+  .sb-item .icn{font-size:19px;--icon-stroke:1.8}
+  .sb-item.on{background:var(--acc-soft);color:var(--acc);font-weight:500}
+  .sb-div{height:var(--hair);background:var(--sep);margin:10px 8px;flex:none}
+  .sb-start{margin:2px 6px 12px}
+  .sb-user{
+    margin-top:auto;padding:12px 10px 4px;display:flex;align-items:center;gap:9px;
+    color:var(--label-2);font-size:13px;min-width:0;
+  }
+  .sb-user .icn{font-size:20px;flex:none;color:var(--label-2)}
+  .sb-user span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--label);font-weight:500}
+
+  #tabbar{display:none}
+  /* logical padding: the sidebar (and its gutter) flip to the right under RTL */
+  #app{
+    max-width:none;padding:28px 40px 48px;
+    padding-inline-start:calc(var(--sbw) + 40px);
+  }
+  /* Signed-out screens have no sidebar, so centre them against the full viewport. */
+  #app.unauth{padding-inline-start:40px}
+  .appc{max-width:1200px;margin:0 auto}
+  .narrow{max-width:780px;margin:0 auto}
+  #app .list{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  /* forms and grouped settings stay single-column — the id-level specificity here
+     must outrank `#app .list` above, which would otherwise grid them too */
+  #app .narrow .list,#modal-root .list{display:flex;flex-direction:column}
+  body.resting #app{padding-bottom:calc(170px + var(--sab))}
+  /* the rest timer drifts to the trailing corner instead of hugging the tab bar */
+  #timer{inset-inline-start:auto;inset-inline-end:24px;width:440px;bottom:24px}
+  #toast{bottom:24px}
+  .exmedia img{height:380px}
+}
+
+/* ---------------------------------------------- pointer-precise devices --- */
+/* touch keeps its :active feedback; a mouse gets hover, which is what makes
+   the desktop tier read as an app and not a scaled-up phone */
+@media (hover:hover){
+  .lrow.tap:hover,.item:hover{background:var(--surface-2)}
+  .chip:hover:not(.on){background:var(--surface-2)}
+  .btn:hover{background:var(--surface-3)}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.tinted:hover,.btn.ghost:hover,.btn.plain:hover{background:var(--surface-2)}
+  .iconbtn:hover{background:var(--surface-2)}
+  .wday:hover{background:var(--surface-2)}
+  .cal-d:not(.has):hover{background:var(--surface-2)}
+  .tile.tappable:hover{background:var(--surface-2)}
+  .glyph-cell:hover:not(.on){background:var(--surface-2)}
+  .today-row:hover{background:var(--surface-3)}
+  .stp button:hover{background:var(--surface-3)}
+  .bw-pm:hover{background:var(--surface-2)}
+  .setrow .setgo:not(:disabled):hover{background:var(--surface-3)}
+  #tabbar button:hover{color:var(--label-2)}
+  #tabbar button.on:hover,#tabbar button.start:hover{color:inherit}
+  #sidebar .sb-item:hover:not(.on){background:var(--surface-2);color:var(--label)}
+  #sidebar .sb-start:hover{filter:brightness(1.08)}
 }
