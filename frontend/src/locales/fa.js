@@ -498,5 +498,11 @@ export default {
   "Custom exercises": "تمرین‌های شخصی",
   "Best weights": "بهترین وزن‌ها",
   "Whole profile": "کل پروفایل",
-  "Media size": "اندازهٔ مدیا"
+  "Media size": "اندازهٔ مدیا",
+
+  // --- حریم خصوصی ---
+  "Who can see my data?": "چه کسی داده‌ام را می‌بیند؟",
+  "Your gym owner (admin) can view your workout history, body-weight log and mobile number. If a coach is assigned to you, they see your logged workouts to guide your training. Nothing is shared beyond this server.": "مالک باشگاه (مدیر) می‌تواند تاریخچه‌ی تمرین، وزن بدن و شماره‌ی موبایل شما را ببیند. اگر مربی به شما تخصیص یابد، تمرین‌های ثبت‌شده‌ی شما را برای هدایت تمرین می‌بیند. هیچ داده‌ای بیرون از این سرور به اشتراک گذاشته نمی‌شود.",
+  "Your coach can see the workouts you log.": "مربی شما تمرین‌های ثبت‌شده‌ی شما را می‌بیند.",
+  "You can see each client's logged workouts — sets, weights, effort and the body-weight reading taken at the session — plus the plan you assigned them. You cannot see their weigh-in log, settings or mobile number.": "برای هر عضو، تمرین‌های ثبت‌شده‌ی او را می‌بینید — ست‌ها، وزن‌ها، زحمت و وزن بدنی که در همان جلسه ثبت شده — به‌علاوه‌ی برنامه‌ای که برایش تخصیص داده‌اید. دفتر وزن بدن، تنظیمات و شماره‌ی موبایل او برای شما دیده نمی‌شود."
 }

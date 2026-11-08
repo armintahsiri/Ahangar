@@ -27,6 +27,7 @@ export default function Plan() {
     {S.coachProgram && <div className="card" style={{ borderColor: 'var(--acc)' }}>
       <h2 style={{ marginTop: 0 }}>{t('Coach-assigned plan')}</h2>
       <div className="muted small">{t('Assigned by {0}. Only your coach can change this plan. You can still log the workout you actually completed.', S.coachProgram.coach?.name || t('your coach'))}</div>
+      <div className="muted small" style={{ marginTop: 6 }}>{t('Your coach can see the workouts you log.')}</div>
     </div>}
     <div className="cols"><div>
       <h4 className="sec">{t('Week schedule')}</h4>

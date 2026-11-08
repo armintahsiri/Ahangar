@@ -90,6 +90,7 @@ export default function Coach() {
 
     <div className="card">
       <div className="muted small">{t('Members are assigned to you by the gym owner. You write a separate program for each of them from your own templates.')}</div>
+      <div className="dim small" style={{ marginTop: 8, lineHeight: 1.5 }}>{t('You can see each client\'s logged workouts — sets, weights, effort and the body-weight reading taken at the session — plus the plan you assigned them. You cannot see their weigh-in log, settings or mobile number.')}</div>
     </div>
 
     <h4 className="sec">{t('My clients')}</h4>

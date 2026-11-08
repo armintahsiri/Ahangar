@@ -88,6 +88,15 @@ export default function Settings() {
       </> : user ? <>
         <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={user.phone} />
         {S.coachProgram && <Row icon="person" iconTint="var(--acc)" title={t('My coach')} subtitle={t('Assigned by {0}. Your program is on the Plan tab.', S.coachProgram.coach?.name || t('your coach'))} accessory="chevron" onClick={() => nav('/plan')} />}
+        <Row icon="shield" iconTint="var(--teal)" title={t('Who can see my data?')} accessory="chevron" onClick={() => useUI.getState().openSheet(() => (
+          <>
+            <h3>{t('Who can see my data?')}</h3>
+            <div className="muted small" style={{ lineHeight: 1.6 }}>
+              {t('Your gym owner (admin) can view your workout history, body-weight log and mobile number. If a coach is assigned to you, they see your logged workouts to guide your training. Nothing is shared beyond this server.')}
+            </div>
+            <div style={{ height: 8 }} />
+          </>
+        ))} />
         {(() => {
           // one quiet line answering "is this device what the server has?" — it earns its
           // place only by saying something, so a healthy sync shows the last success time.
