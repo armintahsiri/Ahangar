@@ -7,6 +7,7 @@
 //         'send'    the PUT to /api/data is in flight
 //         'success' the server accepted the state
 //         'failure' the PUT failed — data is safe locally, the server copy is stale
+//         'conflict' both sides changed the same data — a decision is waiting in Settings
 //         'pull'    the server state was adopted (sign-in / boot)
 //         'reset'   signed out or no profile — nothing to sync
 export function nextSync(cur, evt) {
@@ -17,6 +18,7 @@ export function nextSync(cur, evt) {
     case 'success':
     case 'pull':    return { status: 'synced', at: evt.at }
     case 'failure': return { status: 'failed', at: evt.at }
+    case 'conflict': return { status: 'conflict', at: prev.at }
     case 'reset':   return { status: 'idle', at: null }
     default:        return prev
   }
@@ -29,6 +31,7 @@ export function describeSync(sync, storageError, t, fmtWhen) {
   if (storageError) return { tone: 'error', icon: 'xmark', text: t('Device storage is full — changes may not persist. Export a backup and free up space.') }
   switch (sync?.status) {
     case 'failed':  return { tone: 'error', icon: 'xmark', text: t('Sync failed — your data is safe on this device and will sync later.') }
+    case 'conflict': return { tone: 'error', icon: 'xmark', text: t('Sync conflict — choose which version to keep.') }
     case 'pending': return { tone: 'pending', icon: 'clock', text: t('Waiting to sync…') }
     case 'synced':  return { tone: 'ok', icon: 'check', text: sync.at && fmtWhen ? t('Synced · {0}', fmtWhen(sync.at)) : t('Synced') }
     default:        return { tone: 'ok', icon: 'reset', text: t('Not synced yet') }

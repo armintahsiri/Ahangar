@@ -28,6 +28,11 @@ describe('sync status transitions', () => {
     expect(nextSync({ status: 'failed', at: 9 }, { type: 'reset' })).toEqual({ status: 'idle', at: null })
   })
 
+  it('conflict freezes the status until it is resolved', () => {
+    const synced = { status: 'synced', at: 100 }
+    expect(nextSync(synced, { type: 'conflict' })).toEqual({ status: 'conflict', at: 100 })
+  })
+
   it('unknown events leave the status alone', () => {
     const cur = { status: 'failed', at: 3 }
     expect(nextSync(cur, { type: 'nope' })).toBe(cur)
@@ -45,6 +50,12 @@ describe('describeSync', () => {
     const d = describeSync({ status: 'failed', at: 1 }, false, t, null)
     expect(d.tone).toBe('error')
     expect(d.text).toMatch(/safe on this device/)
+  })
+
+  it('conflict points at the decision', () => {
+    const d = describeSync({ status: 'conflict', at: 1 }, false, t, null)
+    expect(d.tone).toBe('error')
+    expect(d.text).toMatch(/conflict/i)
   })
 
   it('pending is pending', () => {
