@@ -622,6 +622,67 @@ test('reset-password script: rehashes, bumps sv, old password dies, new one work
 })
 
 /* ---------- media tooling: gc-media.mjs and inline-media.mjs ---------- */
+test('media.gc coverage: coach-only refs, disabled-user state, orphans and missing files', { timeout: 30000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-gc-'))
+  const mediaDir = path.join(dir, 'media')
+  fs.mkdirSync(mediaDir)
+  const H = p => p.repeat(64)
+  const blob = b => Buffer.from(`GIF89a${b}`)
+  // four blobs: coach-assignment-only · disabled-user-only · stale unreferenced (control) · orphan (no index entry)
+  const hCoach = H('a'), hDis = H('b'), hOld = H('c'), hOrphan = H('d'), hMissing = H('e')
+  for (const [h, b] of [[hCoach, '1'], [hDis, '2'], [hOld, '3']]) {
+    const f = path.join(mediaDir, `${h}.gif`)
+    fs.writeFileSync(f, blob(b), { mode: 0o600 })
+    fs.utimesSync(f, new Date('2020-01-01'), new Date('2020-01-01')) // well past the grace period
+  }
+  const orphanFile = path.join(mediaDir, `${hOrphan}.gif`)
+  fs.writeFileSync(orphanFile, blob('4'), { mode: 0o600 })
+  fs.utimesSync(orphanFile, new Date('2020-01-01'), new Date('2020-01-01'))
+  const index = {
+    [hCoach]: { ext: 'gif', size: 7, owners: ['coach1'], created: '2020-01-01T00:00:00.000Z' },
+    [hDis]: { ext: 'gif', size: 7, owners: ['u-dis'], created: '2020-01-01T00:00:00.000Z' },
+    [hOld]: { ext: 'gif', size: 7, owners: ['u1'], created: '2020-01-01T00:00:00.000Z' },
+    [hMissing]: { ext: 'gif', size: 7, owners: ['u1'], created: '2020-01-01T00:00:00.000Z' } // no file on disk
+  }
+  fs.writeFileSync(path.join(mediaDir, 'index.json'), JSON.stringify(index))
+  // a disabled member's state still references their media — the file must survive
+  fs.writeFileSync(path.join(dir, 'state-u-dis.json'), JSON.stringify({
+    routines: [{ id: 'r1', ex: [{ id: '0025', mediaRef: { h: hDis, e: 'gif' } }] }]
+  }))
+  // the coach's assignment references theirs (the member renders it through the shared GET)
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({
+    users: [{ id: 'u-dis', name: 'Off', phone: '+989130000555', password: { salt: 'x', hash: 'y' }, disabled: true, created: '2020-01-01T00:00:00.000Z' }],
+    creds: [], subs: [], invites: [], coachLinks: [], coachAssignments: [
+      { coachId: 'coach1', memberId: 'u1', routines: [{ id: 'r1', ex: [{ id: '0025', mediaRef: { h: hCoach, e: 'gif' } }] }] }
+    ]
+  }))
+
+  const run = extra => spawnSync(process.execPath, [path.join(HERE, '..', 'scripts', 'gc-media.mjs'), '--data', dir, ...extra], {
+    cwd: HERE, encoding: 'utf8', timeout: 20000, env: { ...process.env, DATA_DIR: dir }
+  })
+
+  // dry run: only the stale unreferenced blob is a candidate; coach/disabled refs survive
+  const dry = run([])
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, new RegExp(`garbage .*: 1`))
+  assert.doesNotMatch(dry.stdout, new RegExp(hCoach))
+  assert.doesNotMatch(dry.stdout, new RegExp(hDis))
+  assert.match(dry.stdout, new RegExp(hOld))
+  assert.match(dry.stdout, /MISSING ON DISK/)
+  assert.match(dry.stdout, new RegExp(`orphan .not in index.: ${hOrphan}`))
+  // --apply: the control blob and the orphan go, everything referenced and the missing entry stay listed-safe
+  const apply = run(['--apply'])
+  assert.equal(apply.status, 0, apply.stderr)
+  assert.equal(fs.existsSync(path.join(mediaDir, `${hOld}.gif`)), false)
+  assert.equal(fs.existsSync(orphanFile), false)
+  assert.equal(fs.existsSync(path.join(mediaDir, `${hCoach}.gif`)), true)
+  assert.equal(fs.existsSync(path.join(mediaDir, `${hDis}.gif`)), true)
+  const indexAfter = JSON.parse(fs.readFileSync(path.join(mediaDir, 'index.json'), 'utf8'))
+  assert.deepEqual(Object.keys(indexAfter).sort(), [hCoach, hDis].sort())
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+/* ---------- operator tooling: scripts/reset-password.mjs ---------- */
 test('media tools: inline round-trip is byte-exact, gc removes only unreferenced stale files', { timeout: 30000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-mediatools-'))
   const mediaDir = path.join(dir, 'media')
