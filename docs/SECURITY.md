@@ -37,14 +37,33 @@ Back it up, yes — but store the backup the way you would store a password: enc
 web server, never committed to git. If `secret` ever leaks, delete it and restart the API
 (a fresh key is generated; every cookie is invalidated and everyone signs in again).
 
-## 3. Rest-timer notifications live in memory
+## 3. Personal media (`./data/media`)
+
+Custom exercise GIFs/MP4s are stored **outside** the state files, content-addressed by their
+sha256 (`media/<hash>.<ext>` + `media/index.json`). Two facts an operator should know:
+
+- **Serving is authenticated but not owner-scoped:** any signed-in, non-disabled account can
+  fetch any media file. This is deliberate — coach-assigned routines reference the coach's
+  uploads, and a member's client must render them. The guard is that hashes are 256-bit and
+  never listed anywhere a member can see except inside data they already legitimately have.
+- **Quotas** are per profile (`MEDIA_MAX_FILES=40`, `MEDIA_MAX_BYTES=30MB` by default) and
+  uploads are throttled per IP (`MEDIA_UPLOAD_IP_MAX=60/hour`).
+
+Unreferenced blobs (a media nobody's state points at anymore) can be listed and removed with
+`scripts/gc-media.mjs` (dry run by default, `--apply` to delete, 7-day grace period so an
+offline device's next sync cannot 404). To undo the whole migration — references back to
+self-contained base64 inside the states — run `scripts/inline-media.mjs` (dry run by default,
+`--apply`; bumps each state's `rev` so clients pull the inlined copy). Stop the API before
+running either tool with `--apply`.
+
+## 4. Rest-timer notifications live in memory
 
 The "rest over" push is scheduled in the API's memory (`POST /api/push/rest-timer`) and
 cancelled by the client when you're back on screen. If the API restarts while a rest timer is
 running, that one alert is silently gone — everything else (workout-day reminders, subscriptions)
 is persisted in `db.json` and survives restarts.
 
-## 4. Environment knobs that matter
+## 5. Environment knobs that matter
 
 | Variable | Effect |
 |---|---|
@@ -53,7 +72,7 @@ is persisted in `db.json` and survives restarts.
 | `TRUST_PROXY` | how many proxy hops are trusted for client-IP throttling (compose sets 1) |
 | `LOGIN_IP_MAX` / `REGISTER_IP_MAX` / `CREDENTIALS_IP_MAX` | per-IP throttle ceilings |
 
-## 5. Reporting
+## 6. Reporting
 
 Please report vulnerabilities privately via the repository's security advisory feature rather
 than a public issue — see SECURITY policy at the repository root.

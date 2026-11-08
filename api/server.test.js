@@ -621,6 +621,75 @@ test('reset-password script: rehashes, bumps sv, old password dies, new one work
   } finally { s.cleanup() }
 })
 
+/* ---------- media tooling: gc-media.mjs and inline-media.mjs ---------- */
+test('media tools: inline round-trip is byte-exact, gc removes only unreferenced stale files', { timeout: 30000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-mediatools-'))
+  const mediaDir = path.join(dir, 'media')
+  fs.mkdirSync(mediaDir)
+  // two media blobs and their exact data-URLs (what the pre-migration state carried)
+  const gifRaw = gifBytes(32)
+  const mp4Raw = mp4Bytes(24)
+  const hashOf = b => crypto.createHash('sha256').update(b).digest('hex')
+  const hGif = hashOf(gifRaw), hMp4 = hashOf(mp4Raw)
+  fs.writeFileSync(path.join(mediaDir, `${hGif}.gif`), gifRaw, { mode: 0o600 })
+  fs.writeFileSync(path.join(mediaDir, `${hMp4}.mp4`), mp4Raw, { mode: 0o600 })
+  const index = {
+    [hGif]: { ext: 'gif', size: gifRaw.length, owners: ['u1'], created: new Date().toISOString() },
+    [hMp4]: { ext: 'mp4', size: mp4Raw.length, owners: ['u1'], created: new Date().toISOString() },
+    [`${'c'.repeat(64)}`]: { ext: 'gif', size: 10, owners: ['u1'], created: '2020-01-01T00:00:00.000Z' } // stale, unreferenced
+  }
+  fs.writeFileSync(path.join(mediaDir, 'index.json'), JSON.stringify(index))
+  // the stale blob's file mtime must be old too — gc conservatively trusts max(created, mtime)
+  const staleFile = path.join(mediaDir, `${'c'.repeat(64)}.gif`)
+  fs.writeFileSync(staleFile, Buffer.from('GIF89astale'), { mode: 0o600 })
+  fs.utimesSync(staleFile, new Date('2020-01-01'), new Date('2020-01-01'))
+  const gifUrl = `data:image/gif;base64,${gifRaw.toString('base64')}`
+  const mp4Url = `data:video/mp4;base64,${mp4Raw.toString('base64')}`
+  const state = {
+    rev: 5, unit: 'kg',
+    routines: [{ id: 'r1', name: 'R', ex: [{ id: '0025', sets: 3, mediaRef: { h: hGif, e: 'gif' } }] }],
+    customEx: [{ id: 'c1', n: 'Mine', bp: 'chest', mediaRef: { h: hMp4, e: 'mp4' } }]
+  }
+  const stateFile = path.join(dir, 'state-u1.json')
+  fs.writeFileSync(stateFile, JSON.stringify(state))
+  // db.json with a coach assignment also referencing the gif
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ users: [], creds: [], subs: [], invites: [], coachAssignments: [{ coachId: 'x', memberId: 'u1', routines: [{ id: 'r1', name: 'Plan', ex: [{ id: '0025', sets: 2, mediaRef: { h: hGif, e: 'gif' } }] }] }] }))
+
+  const run = (script, extra = []) => spawnSync(process.execPath, [path.join(HERE, '..', 'scripts', script), '--data', dir, ...extra], {
+    cwd: HERE, encoding: 'utf8', timeout: 20000, env: { ...process.env, DATA_DIR: dir }
+  })
+
+  // gc dry run: only the stale unreferenced blob is a candidate; both referenced blobs stay
+  const dry = run('gc-media.mjs')
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /garbage .*: 1\b/)
+  assert.equal(fs.existsSync(path.join(mediaDir, `${'c'.repeat(64)}.gif`)), true)
+  // gc --apply: removes it, keeps referenced media, rewrites the index
+  const apply = run('gc-media.mjs', ['--apply'])
+  assert.equal(apply.status, 0, apply.stderr)
+  assert.equal(fs.existsSync(path.join(mediaDir, `${'c'.repeat(64)}.gif`)), false)
+  assert.equal(fs.existsSync(path.join(mediaDir, `${hGif}.gif`)), true)
+  const indexAfter = JSON.parse(fs.readFileSync(path.join(mediaDir, 'index.json'), 'utf8'))
+  assert.deepEqual(Object.keys(indexAfter).sort(), [hGif, hMp4].sort())
+  // inline dry run: nothing written yet
+  const dryInline = run('inline-media.mjs')
+  assert.equal(dryInline.status, 0, dryInline.stderr)
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).routines[0].ex[0].mediaRef.h, hGif)
+  // inline --apply: byte-exact data-URLs back, rev bumped, mediaRef gone
+  const inl = run('inline-media.mjs', ['--apply'])
+  assert.equal(inl.status, 0, inl.stderr)
+  const st2 = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+  assert.equal(st2.routines[0].ex[0].gifData, gifUrl)
+  assert.equal(st2.routines[0].ex[0].mediaRef, undefined)
+  assert.equal(st2.customEx[0].gif, mp4Url)
+  assert.equal(st2.rev, 6)
+  assert.equal(fs.statSync(stateFile).mode & 0o777, 0o600)
+  // coach assignment in db.json: also inlined (the gif reference reads back the same bytes)
+  const dbAfter = JSON.parse(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'))
+  assert.equal(dbAfter.coachAssignments[0].routines[0].ex[0].gifData, gifUrl)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
 /* ---------- sync versioning (rev / baseRev) ---------- */
 test('sync.put-baserev-roundtrip', async () => {
   const u = await registerUser('Rev Rider')
