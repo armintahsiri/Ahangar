@@ -56,14 +56,14 @@ self-contained base64 inside the states — run `scripts/inline-media.mjs` (dry 
 `--apply`; bumps each state's `rev` so clients pull the inlined copy). Stop the API before
 running either tool with `--apply`.
 
-## 5. Rest-timer notifications live in memory
+## 4. Rest-timer notifications live in memory
 
 The "rest over" push is scheduled in the API's memory (`POST /api/push/rest-timer`) and
 cancelled by the client when you're back on screen. If the API restarts while a rest timer is
 running, that one alert is silently gone — everything else (workout-day reminders, subscriptions)
 is persisted in `db.json` and survives restarts.
 
-## 6. Content-Security-Policy: from Report-Only to enforcing
+## 5. Content-Security-Policy: from Report-Only to enforcing
 
 `web/security-headers.conf` ships two headers: the enforcing CSP (safe-start: `frame-ancestors`,
 `object-src`, `base-uri`, `form-action`) and a full **`Content-Security-Policy-Report-Only`**
@@ -86,7 +86,7 @@ it — its inline `<style>` must not trip `style-src`); any future inline `<scri
 CDN used by the mobile build (`cdn.jsdelivr.net`) would need an explicit `img-src` entry if that
 build ever ran behind this header.
 
-## 7. Environment knobs that matter
+## 6. Environment knobs that matter
 
 | Variable | Effect |
 |---|---|
@@ -95,7 +95,7 @@ build ever ran behind this header.
 | `TRUST_PROXY` | how many proxy hops are trusted for client-IP throttling (compose sets 1) |
 | `LOGIN_IP_MAX` / `REGISTER_IP_MAX` / `CREDENTIALS_IP_MAX` | per-IP throttle ceilings |
 
-## 8. Reporting
+## 7. Reporting
 
 Please report vulnerabilities privately via the repository's security advisory feature rather
 than a public issue — see SECURITY policy at the repository root.
