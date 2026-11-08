@@ -238,7 +238,8 @@ export default function Settings() {
 
     <div className="dim small" style={{ textAlign: 'center', marginTop: 4, lineHeight: 1.6 }}>
       openGym · {t('free & open source (AGPL v3)')}<br />
-      <a href="https://github.com/Jenesyx/opengym-fa" target="_blank" rel="noopener">source code by Jenesyx</a> · exercise data: hasaneyldrm/exercises-dataset (CC)
+      <a href="https://github.com/Jenesyx/opengym-fa" target="_blank" rel="noopener">source code by Jenesyx</a> · <a href="https://github.com/hasaneyldrm/exercises-dataset" target="_blank" rel="noopener">exercise data: hasaneyldrm/exercises-dataset</a><br />
+      {t('names & instructions MIT · images & GIFs © Gym visual (gymvisual.com)')}
     </div>
   </div>
 }

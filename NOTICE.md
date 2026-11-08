@@ -55,7 +55,17 @@ The exercise names, instructions (English in `frontend/src/lib/exercises-data.js
 languages in `frontend/src/instr/`, regenerated via `scripts/build-instructions.mjs`), images
 and animations (fetched into `media/` at build time) come from
 [**hasaneyldrm/exercises-dataset**](https://github.com/hasaneyldrm/exercises-dataset)
-and are **not** covered by openGym's AGPL license — they remain under that dataset's own terms.
+and are **not** covered by openGym's AGPL license — they remain under that dataset's own terms:
+
+- **Names, dataset structure and instruction text** — MIT License (© Hasan Emir Yıldırım),
+  per the dataset's `LICENSE`.
+- **Exercise media (the `images/` and `videos/` files this app fetches on first run)** —
+  **© Gym visual — https://gymvisual.com/**, included in the upstream dataset with the rights
+  holder's written permission and provided at **180×180 resolution** only. Keep the
+  attribution line intact when redistributing; use of the media is governed by Gym visual's
+  Terms & Conditions and the upstream repository's `NOTICE.md` — cloning the dataset does not
+  itself grant a media license.
+
 The media files are not distributed in this repository; they are downloaded from the upstream
 source on first run. If you redistribute openGym with the media included, review the upstream
-license first.
+license and Gym visual's terms first.
