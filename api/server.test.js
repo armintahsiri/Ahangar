@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -35,7 +35,7 @@ process.env.DATA_DIR = TMP
 process.env.ADMIN_UIDS = 'u-admin,u-admin2'
 // INVITE_ONLY stays off for the shared in-process server; the invite suite spawns its own child.
 
-const { createServer } = await import('./server.js')
+const { createServer, reminderDue } = await import('./server.js')
 const server = createServer()
 await new Promise(resolve => server.listen(0, resolve))
 const BASE = `http://127.0.0.1:${server.address().port}`
@@ -276,4 +276,66 @@ test('admin.password-reset-bumps-sv', async () => {
   const fresh = await call('POST', '/api/login', { body: { phone: u.phone, password: 'fresh-password1' } })
   assert.equal(fresh.status, 200)
   assert.equal((await call('GET', '/api/me', { token: fresh.token })).status, 200)
+})
+
+/* ---------- storage hardening ---------- */
+test('state.atomic-write-mode-0600', async () => {
+  const u = await registerUser('Mode Check')
+  assert.equal((await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })).status, 200)
+  // temp file was 0600 + fsynced, so the renamed file is owner-only — matching secret/vapid
+  assert.equal((fs.statSync(path.join(TMP, `state-${u.id}.json`)).mode & 0o777).toString(8), '600')
+  // db.json was rewritten by every registration on the way here — same rule
+  assert.equal((fs.statSync(path.join(TMP, 'db.json')).mode & 0o777).toString(8), '600')
+})
+
+test('state.corrupt-state-not-overwritten', async () => {
+  const u = await registerUser('Corrupt Me')
+  assert.equal((await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })).status, 200)
+  const file = path.join(TMP, `state-${u.id}.json`)
+  fs.writeFileSync(file, '{oops', { mode: 0o600 })
+  // reads and writes both refuse; the broken file is snapshotted, never replaced
+  assert.equal((await call('GET', '/api/data', { token: u.token })).status, 500)
+  assert.equal((await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })).status, 500)
+  assert.equal(fs.readFileSync(file, 'utf8'), '{oops')
+  assert.ok(fs.readdirSync(TMP).some(f => f.startsWith(`state-${u.id}.json.corrupt-`)), 'corrupt snapshot missing')
+})
+
+test('reminder.skips-disabled-user', () => {
+  const now = { date: '2026-11-09', hhmm: '08:00' } // a Monday
+  const S = (on, workouts = []) => ({
+    week: { 1: 'r1' }, routines: [{ id: 'r1', name: 'Push' }], workouts,
+    reminder: { on, time: '08:00', tz: 'UTC' }, dayPlan: {}
+  })
+  assert.equal(reminderDue({ disabled: true }, S(true), now), false)
+  assert.equal(reminderDue({ disabled: false }, S(true), now), true)
+  assert.equal(reminderDue({}, S(true), now), true) // undefined disabled ≡ enabled
+  assert.equal(reminderDue({ disabled: false }, S(false), now), false) // reminder off
+  assert.equal(reminderDue({ disabled: false }, S(true, [{ d: '2026-11-09' }]), now), false) // already trained today
+  assert.equal(reminderDue({ disabled: false }, { ...S(true), week: {} }, now), false) // rest day
+  assert.equal(reminderDue({ disabled: false, lastReminder: '2026-11-09' }, S(true), now), false) // already sent today
+  assert.equal(reminderDue({ disabled: false }, { ...S(true), reminder: { on: true, time: '09:00', tz: 'UTC' } }, now), false) // wrong time
+})
+
+test('state.corrupt-db-fails-fast', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-corrupt-'))
+  try {
+    fs.writeFileSync(path.join(dir, 'db.json'), '{corrupt')
+    const r = spawnSync(process.execPath, [path.join(HERE, 'server.js')], {
+      cwd: HERE,
+      env: { ...process.env, DATA_DIR: dir, PORT: '0' },
+      encoding: 'utf8',
+      timeout: 15000
+    })
+    assert.equal(r.signal, null, 'server was killed by timeout — it started instead of failing fast')
+    assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstderr: ${r.stderr}`)
+    assert.match(r.stderr, /not valid JSON/)
+    assert.match(r.stderr, /db\.json/)
+    // exactly one snapshot, and the broken original is untouched
+    const copies = fs.readdirSync(dir).filter(f => f.startsWith('db.json.corrupt-'))
+    assert.equal(copies.length, 1)
+    assert.equal(fs.readFileSync(path.join(dir, copies[0]), 'utf8'), '{corrupt')
+    assert.equal(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'), '{corrupt')
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* fine */ }
+  }
 })

@@ -32,8 +32,29 @@ if (!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, crypto.randomBytes(
 const SECRET = fs.readFileSync(secretFile, 'utf8').trim();
 
 const dbFile = path.join(DATA, 'db.json');
+// One corrupt-file snapshot per file: the reminder loop re-reads every state file each 10s,
+// and a copy-per-read would pile up snapshots for a file that stays broken.
+function copyCorrupt(file) {
+  try {
+    const dir = path.dirname(file), base = path.basename(file);
+    if (fs.readdirSync(dir).some(f => f.startsWith(base + '.corrupt-'))) return;
+    fs.writeFileSync(file + '.corrupt-' + Date.now(), fs.readFileSync(file), { mode: 0o600 });
+  } catch (e) { console.error('corrupt snapshot failed:', file, e.message); }
+}
+// Single-process assumption: every read-modify-write of `db` below runs synchronously with no
+// await between the read and the write, so Node's single thread serializes them. Running this
+// API as multiple processes (cluster) breaks that assumption — lost updates and double-spent
+// invites would follow.
 let db = { users: [], creds: [], subs: [], invites: [] };
-try { db = JSON.parse(fs.readFileSync(dbFile, 'utf8')); } catch {}
+if (fs.existsSync(dbFile)) {
+  try { db = JSON.parse(fs.readFileSync(dbFile, 'utf8')); }
+  catch (e) {
+    // An unreadable db is data, not garbage: never boot over it with an empty user table.
+    copyCorrupt(dbFile);
+    console.error(`FATAL: ${dbFile} is not valid JSON (${e.message}). A snapshot was saved next to it (db.json.corrupt-*). Fix or remove the file and restart — refusing to start empty.`);
+    process.exit(1);
+  }
+}
 db.subs = db.subs || [];
 // Passkey credentials are no longer accepted or retained by this version.
 const hadPasskeys = (db.creds || []).length > 0;
@@ -69,14 +90,31 @@ const coachOf = memberId => {
 };
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2)); }
 function atomicWrite(file, content) {
+  // Temp file written at 0600 and fsynced, then renamed — atomic on the same filesystem,
+  // and every rewritten file (db.json, state-*.json) ends up owner-only like secret/vapid.
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, content);
+  const fd = fs.openSync(tmp, 'w', 0o600);
+  try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); }
+  finally { fs.closeSync(fd); }
   fs.renameSync(tmp, file);
 }
 if (hadPasskeys || hadCoachInvites) saveDb();
 const stateFile = uid => path.join(DATA, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
+// Strict on purpose: a missing file is "no data yet" (null), but a file that exists and does
+// not parse is data we refuse to pretend is absent — callers surface a 500 and the file is
+// never silently overwritten. Returns null only for ENOENT.
 function readState(uid) {
-  try { return JSON.parse(fs.readFileSync(stateFile(uid), 'utf8')); } catch { return null; }
+  const file = stateFile(uid);
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); }
+  catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  try { return JSON.parse(raw); }
+  catch (e) {
+    copyCorrupt(file);
+    const err = new Error(`state file corrupt: ${file} (${e.message})`);
+    err.corrupt = true;
+    throw err;
+  }
 }
 
 /* ---------- push notifications (Web Push / VAPID) ---------- */
@@ -146,17 +184,24 @@ function userNow(tz) {
     return { date: `${g('year')}-${g('month')}-${g('day')}`, hhmm: `${g('hour')}:${g('minute')}` };
   } catch { return null; } // unknown/invalid tz string — skip this user rather than guess
 }
+// The per-user gate for the workout-day reminder, in the user's own timezone (`now` =
+// { date, hhmm }). Disabled accounts never fire — a push subscription can outlive a disable.
+export function reminderDue(user, S, now) {
+  if (!S || user.disabled) return false;
+  if (!S.reminder?.on || S.reminder.time !== now.hhmm) return false;
+  if (user.lastReminder === now.date) return false;
+  if ((S.workouts || []).some(w => w.d === now.date)) return false; // already trained today
+  return !!effectiveRoutineId(S, now.date); // rest day → nothing planned
+}
 setInterval(() => {
   for (const user of db.users) {
     if (!db.subs.some(s => s.userId === user.id)) continue;
-    const S = readState(user.id);
-    if (!S?.reminder?.on) continue;
-    const now = userNow(S.reminder.tz || 'UTC');
-    if (!now || S.reminder.time !== now.hhmm) continue;
-    if (user.lastReminder === now.date) continue;
-    if ((S.workouts || []).some(w => w.d === now.date)) continue;
+    let S;
+    try { S = readState(user.id); }
+    catch (e) { console.error('reminder: unreadable state, skipping user', user.id, e.message); continue; }
+    const now = userNow(S?.reminder?.tz || 'UTC');
+    if (!now || !reminderDue(user, S, now)) continue;
     const rid = effectiveRoutineId(S, now.date);
-    if (!rid) continue; // rest day — nothing planned
     const routine = (S.routines || []).find(r => r.id === rid);
     console.log('reminder firing', user.id, rid);
     user.lastReminder = now.date;
@@ -366,20 +411,23 @@ const routes = {
   'GET /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    try {
-      const state = JSON.parse(fs.readFileSync(stateFile(user.id), 'utf8'));
-      const assignment = assignmentFor(user.id);
-      if (assignment) {
-        const assigned = (assignment.routines || []).map(r => ({ ...r, coachManaged: true }));
-        state.routines = [...(state.routines || []).filter(r => !assigned.some(a => a.id === r.id)), ...assigned];
-        state.week = { ...(state.week || {}), ...(assignment.week || {}) };
-        state.coachProgram = { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 };
-      }
-      json(res, 200, { state });
-    } catch {
-      const assignment = assignmentFor(user.id);
-      json(res, 200, { state: assignment ? { routines: (assignment.routines || []).map(r => ({ ...r, coachManaged: true })), week: assignment.week || {}, coachProgram: { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 } } : null });
+    let state;
+    try { state = readState(user.id); }
+    catch (e) {
+      console.error('GET /api/data', e.message);
+      return json(res, 500, { error: 'state file corrupt — not overwriting; ask the server operator to restore it' });
     }
+    const assignment = assignmentFor(user.id);
+    // No file yet: serve the coach assignment alone if there is one, like the old
+    // catch-all did for a missing file — a corrupt file never reaches this path (500 above).
+    if (!state) return json(res, 200, { state: assignment ? { routines: (assignment.routines || []).map(r => ({ ...r, coachManaged: true })), week: assignment.week || {}, coachProgram: { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 } } : null });
+    if (assignment) {
+      const assigned = (assignment.routines || []).map(r => ({ ...r, coachManaged: true }));
+      state.routines = [...(state.routines || []).filter(r => !assigned.some(a => a.id === r.id)), ...assigned];
+      state.week = { ...(state.week || {}), ...(assignment.week || {}) };
+      state.coachProgram = { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 };
+    }
+    json(res, 200, { state });
   },
 
   'PUT /api/data': async (req, res) => {
@@ -387,6 +435,13 @@ const routes = {
     if (!user) return json(res, 401, { error: 'not signed in' });
     const body = await readBody(req);
     if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
+    // A corrupt existing file is data we cannot read — never overwrite it with whatever the
+    // client has (that would look like a healthy sync while history is destroyed).
+    try { readState(user.id); }
+    catch (e) {
+      console.error('PUT /api/data', e.message);
+      return json(res, 500, { error: 'state file corrupt — not overwriting; ask the server operator to restore it' });
+    }
     delete body.state.active;              // in-progress workouts stay device-local
     delete body.state.coachProgram;        // coach-owned assignment is never accepted from a member client
     const assignment = assignmentFor(user.id);
@@ -480,13 +535,16 @@ const routes = {
   'GET /api/admin/users': async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const users = db.users.map(u => {
-      const S = readState(u.id) || {};
+      let S;
+      try { S = readState(u.id) || {}; }
+      catch (e) { S = { corrupt: true }; }   // additive flag — one broken file must not take the list down
       const workouts = S.workouts || [];
       const last = workouts[workouts.length - 1];
       return {
         id: u.id, name: u.name, phone: u.phone || null, created: u.created || null,
         disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null,
         coach: isCoach(u) || isAdmin(u) ? null : coachOf(u.id),
+        corrupt: !!S.corrupt,
         workouts: workouts.length,
         lastWorkout: last ? last.d : null,
         lastSync: S._ts || null,
@@ -503,7 +561,9 @@ const routes = {
     const id = new URL(req.url, 'http://x').searchParams.get('id');
     const u = db.users.find(x => x.id === id);
     if (!u) return json(res, 404, { error: 'no such user' });
-    const S = readState(u.id) || {};
+    let S;
+    try { S = readState(u.id) || {}; }
+    catch (e) { console.error('GET /api/admin/user', e.message); return json(res, 500, { error: 'state file corrupt' }); }
     json(res, 200, {
       user: { id: u.id, name: u.name, phone: u.phone || null, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null, coach: coachOf(u.id) },
       unit: S.unit || 'kg',
@@ -616,9 +676,12 @@ const routes = {
     const clients = links.map(link => {
       const u = db.users.find(x => x.id === link.memberId);
       if (!u || u.disabled) return null;
-      const state = readState(u.id) || {};
+      let state;
+      try { state = readState(u.id) || {}; }
+      catch (e) { state = { corrupt: true }; }   // additive flag — see GET /api/admin/users
       const workouts = state.workouts || [];
       return { id: u.id, name: u.name, disabled: !!u.disabled, created: u.created || null,
+        corrupt: !!state.corrupt,
         workouts: workouts.length, lastWorkout: workouts.at(-1)?.d || null,
         assignment: db.coachAssignments.find(x => x.coachId === coach.id && x.memberId === u.id) || null };
     }).filter(Boolean);
@@ -631,7 +694,9 @@ const routes = {
     if (!coachLink(coach.id, id)) return json(res, 404, { error: 'client is not linked to this coach' });
     const u = db.users.find(x => x.id === id);
     if (!u) return json(res, 404, { error: 'no such user' });
-    const S = readState(id) || {};
+    let S;
+    try { S = readState(id) || {}; }
+    catch (e) { console.error('GET /api/coach/client', e.message); return json(res, 500, { error: 'state file corrupt' }); }
     json(res, 200, { user: { id: u.id, name: u.name, disabled: !!u.disabled, created: u.created || null },
       // the client's own body preference drives which anatomy the muscle map draws
       body: S.body || 'male',
