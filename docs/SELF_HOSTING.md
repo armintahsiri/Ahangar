@@ -157,7 +157,27 @@ Wake Lock API is only available over HTTPS or on `http://localhost`, so on a pla
 instance the switch shows as unsupported. Nothing to configure server-side either way, and iOS
 refuses the lock while the phone is in Low Power Mode.
 
-## 7. Updating
+## 7. HSTS (Strict Transport Security)
+
+openGym's nginx deliberately does **not** send `Strict-Transport-Security`: when TLS terminates
+outside the container (Cloudflare Tunnel, Caddy, Traefik, a load balancer), the header belongs on
+whatever layer actually ends HTTPS — nginx inside would advertise an `https`-only policy for a
+hop it never sees. Put it where the certificate lives:
+
+```nginx
+# nginx, on the TLS-terminating server block:
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+```
+
+```Caddyfile
+# Caddy 2 already sends HSTS for https sites; to make it explicit:
+header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+```
+
+Start with a short `max-age` (e.g. `86400`) until every subdomain is confirmed to work over
+HTTPS — HSTS is sticky in browsers and hard to walk back.
+
+## 8. Updating
 
 Build the current fork from source:
 
