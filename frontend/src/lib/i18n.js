@@ -6,6 +6,7 @@
 // build ships English + Persian only; the loading machinery stays in place so more
 // packs can be dropped back in without code changes.
 import { useSyncExternalStore } from 'react'
+import { loadExNames } from './exnames.js'
 
 // UI languages. A language without an instruction pack falls back to English instructions.
 export const LANGS = { en: 'English', fa: 'فارسی' }
@@ -47,6 +48,7 @@ export async function setLang(l) {
     dict = l === 'en' ? {} : (await localePacks['../locales/' + l + '.js']()).default
     instr = l === 'en' || !INSTR_LANGS.includes(l) ? null : (await instrPacks['../instr/' + l + '.js']()).default
   } catch (e) { dict = {}; instr = null }
+  await loadExNames(l)   // Persian exercise names ride the same lazy-load and notify cycle
   notify()
 }
 
