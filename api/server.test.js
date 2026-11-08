@@ -481,6 +481,119 @@ test('throttle.prune drops expired buckets and the map is size-capped', () => {
   _buckets.clear()
 })
 
+/* ---------- personal media: upload, serve, quota, range ---------- */
+const gifBytes = n => Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(n || 64, 7)])
+const mp4Bytes = n => Buffer.concat([Buffer.alloc(4, 1), Buffer.from('ftypisom'), Buffer.alloc(n || 64, 9)])
+
+async function upload(token, buf, ctype, base = BASE) {
+  const res = await fetch(base + '/api/media', {
+    method: 'POST',
+    headers: { 'Content-Type': ctype, ...(token ? { cookie: `gymsid=${token}` } : {}) },
+    body: buf
+  })
+  const json = await res.json().catch(() => null)
+  return { status: res.status, json }
+}
+
+test('media.upload: gif and mp4 accepted, magic bytes enforced, dedup shares owners', async () => {
+  const a = await registerUser('Media A')
+  const b = await registerUser('Media B')
+  const gif = gifBytes(100)
+  const up = await upload(a.token, gif, 'image/gif')
+  assert.equal(up.status, 200)
+  assert.match(up.json.h, /^[a-f0-9]{64}$/)
+  assert.equal(up.json.e, 'gif')
+  assert.equal(up.json.size, gif.length)
+  const file = path.join(TMP, 'media', `${up.json.h}.gif`)
+  assert.equal(fs.readFileSync(file).equals(gif), true)
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+  // mp4: ftyp at offset 4
+  const mp4 = mp4Bytes(50)
+  const up2 = await upload(a.token, mp4, 'video/mp4')
+  assert.equal(up2.status, 200)
+  assert.equal(up2.json.e, 'mp4')
+  // same bytes, second user → same hash, no new file, owners grow
+  const up3 = await upload(b.token, gif, 'image/gif')
+  assert.equal(up3.status, 200)
+  assert.equal(up3.json.h, up.json.h)
+  const index = JSON.parse(fs.readFileSync(path.join(TMP, 'media', 'index.json'), 'utf8'))
+  assert.equal(index[up.json.h].owners.length, 2)
+  assert.equal(Object.keys(index).length, 2)
+  // declared type without the magic → refused
+  assert.equal((await upload(a.token, Buffer.from('not a gif at all'), 'image/gif')).status, 415)
+  // magic without the declared type → refused
+  assert.equal((await upload(a.token, gif, 'video/mp4')).status, 415)
+  // over 1 MB → refused before reading it all
+  assert.equal((await upload(a.token, Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(1048576)]), 'image/gif')).status, 413)
+  // anonymous → 401
+  assert.equal((await upload(null, gif, 'image/gif')).status, 401)
+})
+
+test('media.upload: quota counts files and bytes per owner, re-upload of owned media is free', async () => {
+  process.env.MEDIA_MAX_FILES = '2'
+  process.env.MEDIA_MAX_BYTES = String(2 * 1048576)
+  try {
+    const a = await registerUser('Quota User')
+    assert.equal((await upload(a.token, gifBytes(10), 'image/gif')).status, 200)
+    assert.equal((await upload(a.token, mp4Bytes(10), 'video/mp4')).status, 200)
+    // a third distinct file breaks the 2-file quota → 413
+    const third = await upload(a.token, Buffer.concat([Buffer.from('GIF87a'), Buffer.alloc(10, 3)]), 'image/gif')
+    assert.equal(third.status, 413)
+    assert.match(third.json.error, /quota/)
+    // re-uploading an owned file consumes nothing — still 200 with the quota at its ceiling
+    assert.equal((await upload(a.token, gifBytes(10), 'image/gif')).status, 200)
+  } finally {
+    delete process.env.MEDIA_MAX_FILES
+    delete process.env.MEDIA_MAX_BYTES
+  }
+})
+
+test('media.serve: content-type, cache headers, 404s and range requests', async () => {
+  const a = await registerUser('Range Rider')
+  const gif = gifBytes(64)
+  const { json: up } = await upload(a.token, gif, 'image/gif')
+  const h = up.h
+  const get = async (p, opt = {}) => {
+    const res = await fetch(BASE + p, { headers: { ...(opt.token ? { cookie: `gymsid=${opt.token}` } : {}), ...(opt.headers || {}) } })
+    return { status: res.status, headers: res.headers, buf: res.status === 200 || res.status === 206 ? Buffer.from(await res.arrayBuffer()) : null }
+  }
+  const ok = await get(`/api/media/${h}.gif`, { token: a.token })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.headers.get('content-type'), 'image/gif')
+  assert.equal(ok.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(ok.headers.get('cache-control'), 'private, max-age=31536000, immutable')
+  assert.equal(ok.headers.get('etag'), `"${h}"`)
+  assert.equal(ok.headers.get('accept-ranges'), 'bytes')
+  assert.equal(ok.buf.equals(gif), true)
+  // middle and suffix ranges
+  const mid = await get(`/api/media/${h}.gif`, { token: a.token, headers: { range: 'bytes=2-5' } })
+  assert.equal(mid.status, 206)
+  assert.equal(mid.headers.get('content-range'), `bytes 2-5/${gif.length}`)
+  assert.equal(mid.buf.equals(gif.subarray(2, 6)), true)
+  const suf = await get(`/api/media/${h}.gif`, { token: a.token, headers: { range: 'bytes=-4' } })
+  assert.equal(suf.status, 206)
+  assert.equal(suf.buf.equals(gif.subarray(gif.length - 4)), true)
+  // valid syntax, unsatisfiable → 416 with the right Content-Range
+  const unsat = await get(`/api/media/${h}.gif`, { token: a.token, headers: { range: 'bytes=999999-' } })
+  assert.equal(unsat.status, 416)
+  assert.equal(unsat.headers.get('content-range'), `bytes */${gif.length}`)
+  // path games → 404, never a read outside the media dir
+  for (const p of ['../db.json', '%2e%2e%2fdb.json', `${'a'.repeat(63)}.gif`, `${h}.txt`, `${h}`]) {
+    assert.equal((await get(`/api/media/${p}`, { token: a.token })).status, 404, p)
+  }
+  // unknown but well-formed hash → 404
+  assert.equal((await get(`/api/media/${'b'.repeat(64)}.gif`, { token: a.token })).status, 404)
+  // no session → 401
+  assert.equal((await get(`/api/media/${h}.gif`)).status, 401)
+  // a disabled user cannot read either
+  const at = await admin()
+  await call('POST', '/api/admin/user/disable', { token: at, body: { id: a.id, disabled: true } })
+  assert.equal((await get(`/api/media/${h}.gif`, { token: a.token })).status, 401)
+  await call('POST', '/api/admin/user/disable', { token: at, body: { id: a.id, disabled: false } })
+  // cross-site POST refused by the shared origin guard
+  assert.equal((await raw('POST', '/api/media', { headers: { origin: 'https://evil.example' }, token: a.token, body: {} })).status, 403)
+})
+
 /* ---------- operator tooling: scripts/reset-password.mjs ---------- */
 test('reset-password script: rehashes, bumps sv, old password dies, new one works', { timeout: 30000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-reset-'))

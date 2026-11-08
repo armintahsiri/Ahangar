@@ -230,6 +230,93 @@ setInterval(() => {
 // interval could sit on your target minute for up to 59s before noticing. 10s caps that at ~9s.
 }, 10000).unref();
 
+/* ---------- personal media store ---------- */
+// Personal GIF/MP4 files live here, content-addressed by sha256, OUTSIDE the per-user state
+// so a workout history never carries megabytes of base64 again. MEDIA_MIGRATE only signals
+// the client that it may start moving existing media; upload/serve work regardless.
+const MEDIA_DIR = path.join(DATA, 'media');
+fs.mkdirSync(MEDIA_DIR, { recursive: true });
+const isMediaMigrate = () => /^(1|true|yes|on)$/i.test(process.env.MEDIA_MIGRATE || '');
+const mediaEnvMax = (name, fallback) => Math.max(1, Math.trunc(+(process.env[name] || fallback)) || fallback);
+const MEDIA_MAX_BYTES_PER_FILE = 1 * 1024 * 1024;   // 1 MiB hard cap per file, mirrors the client hint
+const mediaIndexFile = path.join(MEDIA_DIR, 'index.json');
+let mediaIndex = {};                                 // hash -> { ext, size, owners: [uid], created }
+try { mediaIndex = JSON.parse(fs.readFileSync(mediaIndexFile, 'utf8')); }
+catch (e) { if (fs.existsSync(mediaIndexFile)) console.error('media index unreadable — starting empty:', e.message); }
+function saveMediaIndex() { atomicWrite(mediaIndexFile, JSON.stringify(mediaIndex, null, 2)); }
+function mediaUsage(uid) {
+  let files = 0, bytes = 0;
+  for (const m of Object.values(mediaIndex)) if ((m.owners || []).includes(uid)) { files++; bytes += m.size || 0; }
+  return { files, bytes };
+}
+function readRawBody(req, max) {
+  return new Promise((resolve, reject) => {
+    let failed = false;
+    const tooLarge = () => {
+      if (failed) return;
+      failed = true;
+      const err = new Error('too large');
+      err.tooLarge = true;
+      reject(err);
+      req.resume();   // drain whatever is still coming so the 413 can actually be delivered
+    };
+    if (+(req.headers['content-length'] || 0) > max) return tooLarge();
+    let size = 0; const chunks = [];
+    req.on('data', d => { size += d.length; if (size > max) return tooLarge(); chunks.push(d); });
+    req.on('end', () => { if (!failed) resolve(Buffer.concat(chunks)); });
+    req.on('error', reject);
+  });
+}
+// Declared Content-Type is not trusted on its own: the bytes must carry the real signature.
+function mediaKind(buf) {
+  const head = buf.subarray(0, 8).toString('latin1');
+  if (buf.length >= 6 && (head.startsWith('GIF87a') || head.startsWith('GIF89a'))) return 'gif';
+  if (buf.length >= 8 && head.slice(4, 8) === 'ftyp') return 'mp4';
+  return null;
+}
+const MEDIA_NAME_RE = /^[a-f0-9]{64}\.(gif|mp4)$/;
+// Served to ANY signed-in, non-disabled account: coach-assigned routines reference the
+// coach's uploads, and a 256-bit hash is not guessable — see docs/SECURITY.md.
+function serveMedia(req, res, pathname) {
+  const user = readSession(req);
+  if (!user) return json(res, 401, { error: 'not signed in' });
+  const name = pathname.slice('/api/media/'.length);
+  if (!MEDIA_NAME_RE.test(name)) return json(res, 404, { error: 'not found' });
+  const file = path.join(MEDIA_DIR, name);
+  let stat;
+  try { stat = fs.statSync(file); } catch { return json(res, 404, { error: 'not found' }); }
+  const ext = name.split('.')[1];
+  const base = {
+    'Content-Type': ext === 'gif' ? 'image/gif' : 'video/mp4',
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'private, max-age=31536000, immutable',
+    ETag: `"${name.split('.')[0]}"`,
+    'Accept-Ranges': 'bytes'
+  };
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+  if (m && (m[1] !== '' || m[2] !== '')) {
+    let start, end;
+    if (m[1] === '') {                       // suffix range: last N bytes
+      const n = Math.trunc(+m[2]);
+      if (!n || n > stat.size) { res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); return res.end(); }
+      start = stat.size - n; end = stat.size - 1;
+    } else {
+      start = Math.trunc(+m[1]);
+      end = m[2] === '' ? stat.size - 1 : Math.min(Math.trunc(+m[2]), stat.size - 1);
+      if (start >= stat.size || start > end) { res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); return res.end(); }
+    }
+    const len = end - start + 1;
+    const chunk = Buffer.alloc(len);
+    const fd = fs.openSync(file, 'r');
+    try { fs.readSync(fd, chunk, 0, len, start); } finally { fs.closeSync(fd); }
+    res.writeHead(206, { ...base, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Content-Length': len });
+    return res.end(chunk);
+  }
+  res.writeHead(200, { ...base, 'Content-Length': stat.size });
+  if (req.method === 'HEAD') return res.end();
+  fs.createReadStream(file).pipe(res);
+}
+
 /* ---------- sessions (signed cookie) ---------- */
 function sign(payload) {
   const mac = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
@@ -395,6 +482,15 @@ export function _pruneBuckets(now = Date.now()) {                      // tests 
 }
 export function _bucketHit(key, windowMs) { bucketHit(key, windowMs) } // tests only
 
+// Once per boot: the first per-IP rejection logs the resolved client IP (never a phone
+// number) so the operator can sanity-check their proxy chain.
+let throttleWarned = false;
+function warnThrottle(ip) {
+  if (throttleWarned) return;
+  throttleWarned = true;
+  console.log(`throttle: per-IP limit reached for client ${ip} — if every member shares one IP, TRUST_PROXY is set wrong`);
+}
+
 // Limits. Everyone at one gym may sit behind one IP, so the per-IP register cap is modest
 // and every value is env-tunable; windows are the ones the UI messages quote.
 const LOGIN_WINDOW = 15 * 60_000, LOGIN_PHONE_MAX = 10;
@@ -421,7 +517,7 @@ const routes = {
   'GET /api/health': async (req, res) => json(res, 200, { ok: true, users: db.users.length }),
 
   // Public config the login screen needs before anyone is signed in.
-  'GET /api/config': async (req, res) => json(res, 200, { invite_only: INVITE_ONLY, club_name: CLUB_NAME }),
+  'GET /api/config': async (req, res) => json(res, 200, { invite_only: INVITE_ONLY, club_name: CLUB_NAME, media_migrate: isMediaMigrate() }),
 
   'GET /api/me': async (req, res) => {
     const user = readSession(req);
@@ -459,8 +555,10 @@ const routes = {
     const ip = clientIp(req);
     const phoneKey = `login:${ip}:${phone || String(body.phone || '').slice(0, 40)}`;
     const ipKey = `lip:${ip}`;
-    if (bucketBlocked(phoneKey, LOGIN_PHONE_MAX, LOGIN_WINDOW) || bucketBlocked(ipKey, LOGIN_IP_MAX, LOGIN_WINDOW))
+    if (bucketBlocked(phoneKey, LOGIN_PHONE_MAX, LOGIN_WINDOW) || bucketBlocked(ipKey, LOGIN_IP_MAX, LOGIN_WINDOW)) {
+      if (bucketBlocked(ipKey, LOGIN_IP_MAX, LOGIN_WINDOW)) warnThrottle(ip);
       return json(res, 429, { error: 'too many sign-in attempts — try again in 15 minutes' });
+    }
     const user = db.users.find(u => u.phone === phone);
     // one scrypt run either way — an unknown number burns the same time as a wrong password
     // (the verify deliberately runs even when the user is missing — no short-circuit)
@@ -557,6 +655,58 @@ const routes = {
     body.state.rev = currentRev + 1;
     atomicWrite(stateFile(user.id), JSON.stringify(body.state));
     json(res, 200, { ok: true, rev: body.state.rev, ts: body.state._ts || null });
+  },
+
+  // Personal media upload — raw bytes, not JSON/base64. Same-origin guard and the media
+  // upload throttle apply; the 1 MB cap rejects before the body is fully read.
+  'POST /api/media': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const ip = clientIp(req);
+    const upKey = `media:${ip}`;
+    if (bucketBlocked(upKey, mediaEnvMax('MEDIA_UPLOAD_IP_MAX', 60), REGISTER_WINDOW)) {
+      warnThrottle(ip);
+      return json(res, 429, { error: 'too many uploads — try again later' });
+    }
+    const ctype = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (ctype !== 'image/gif' && ctype !== 'video/mp4') return json(res, 415, { error: 'send the raw file with Content-Type image/gif or video/mp4' });
+    let buf;
+    try { buf = await readRawBody(req, MEDIA_MAX_BYTES_PER_FILE); }
+    catch { return json(res, 413, { error: 'media must be 1 MB or smaller' }); }
+    if (!buf.length) return json(res, 415, { error: 'empty body' });
+    const kind = mediaKind(buf);
+    if (!kind || (kind === 'gif' && ctype !== 'image/gif') || (kind === 'mp4' && ctype !== 'video/mp4'))
+      return json(res, 415, { error: 'content does not match the declared type — GIF must start with GIF87a/89a, MP4 with ftyp' });
+    const hash = crypto.createHash('sha256').update(buf).digest('hex');
+    // quota, file write and index update share one sync block (no await in between)
+    let entry = mediaIndex[hash];
+    if (!entry) {
+      const maxFiles = mediaEnvMax('MEDIA_MAX_FILES', 40);
+      const maxBytes = mediaEnvMax('MEDIA_MAX_BYTES', 30 * 1048576);
+      const usage = mediaUsage(user.id);
+      if (usage.files + 1 > maxFiles || usage.bytes + buf.length > maxBytes) {
+        warnThrottle(ip);
+        return json(res, 413, { error: `media quota reached — ${maxFiles} files / ${Math.round(maxBytes / 1048576)} MB per profile` });
+      }
+      const file = path.join(MEDIA_DIR, `${hash}.${kind}`);
+      const tmp = file + '.tmp';
+      const fd = fs.openSync(tmp, 'w', 0o600);
+      try { fs.writeFileSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      fs.renameSync(tmp, file);
+      mediaIndex[hash] = { ext: kind, size: buf.length, owners: [user.id], created: new Date().toISOString() };
+    } else {
+      // dedupe: same bytes → same file, the caller just joins the owners list
+      if (!entry.owners.includes(user.id)) entry.owners.push(user.id);
+      const file = path.join(MEDIA_DIR, `${hash}.${entry.ext}`);
+      if (!fs.existsSync(file)) {
+        const tmp = file + '.tmp';
+        const fd = fs.openSync(tmp, 'w', 0o600);
+        try { fs.writeFileSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        fs.renameSync(tmp, file);
+      }
+    }
+    saveMediaIndex();
+    json(res, 200, { h: hash, e: kind, size: buf.length });
   },
 
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
@@ -870,6 +1020,10 @@ const routes = {
 export function createServer() {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
+    // media GET/HEAD are handled before everything else (own session check inside)
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/api/media/')) {
+      return serveMedia(req, res, url.pathname);
+    }
     // cross-site state-changing requests are refused before anything else runs
     if (req.method !== 'GET' && req.method !== 'HEAD' && !originAllowed(req)) {
       return json(res, 403, { error: 'cross-origin request refused' });
@@ -887,5 +1041,5 @@ export function createServer() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const server = createServer();
-  server.listen(PORT, () => console.log(`gym-api on :${server.address().port}`));
+  server.listen(PORT, () => console.log(`gym-api on :${server.address().port} (TRUST_PROXY=${Math.max(0, Math.trunc(+(process.env.TRUST_PROXY || 0)) || 0)})`));
 }
