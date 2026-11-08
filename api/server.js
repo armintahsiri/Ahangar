@@ -4,6 +4,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import webpush from 'web-push';
 
 const PORT = +(process.env.PORT || 3000);
@@ -706,14 +707,23 @@ const routes = {
   }
 };
 
-http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://x');
-  const key = req.method + ' ' + url.pathname;
-  const handler = routes[key];
-  if (!handler) return json(res, 404, { error: 'not found' });
-  try { await handler(req, res); }
-  catch (e) {
-    console.error(key, e);
-    if (!res.headersSent) json(res, 500, { error: 'server error' });
-  }
-}).listen(PORT, () => console.log(`gym-api on :${PORT}`));
+// Exported for tests (api/server.test.js): importing this module starts nothing, so a test
+// can create its own server on port 0 with a temp DATA_DIR. Direct runs behave exactly as before.
+export function createServer() {
+  return http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://x');
+    const key = req.method + ' ' + url.pathname;
+    const handler = routes[key];
+    if (!handler) return json(res, 404, { error: 'not found' });
+    try { await handler(req, res); }
+    catch (e) {
+      console.error(key, e);
+      if (!res.headersSent) json(res, 500, { error: 'server error' });
+    }
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const server = createServer();
+  server.listen(PORT, () => console.log(`gym-api on :${server.address().port}`));
+}
