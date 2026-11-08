@@ -75,6 +75,16 @@ export async function migrateStateMedia(state, uploadFn) {
   return { state: next, migrated, failed }
 }
 
+// Every hash the state still references — the store compares this before/after a successful
+// push to know whether the per-profile media quota should be released server-side.
+export function mediaHashesOf(state) {
+  const out = new Set();
+  const add = item => { const r = mediaRefOf(item); if (r) out.add(r.h) };
+  for (const r of state?.routines || []) for (const e of r.ex || []) add(e);
+  for (const c of state?.customEx || []) add(c);
+  return out;
+}
+
 // Backup independence: turn every server reference back into an inline data-URL so the
 // exported JSON stands alone. An item whose fetch fails keeps its reference and its hash is
 // reported — the backup stays valid, just not self-contained for that one file.

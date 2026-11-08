@@ -621,6 +621,62 @@ test('reset-password script: rehashes, bumps sv, old password dies, new one work
   } finally { s.cleanup() }
 })
 
+/* ---------- media quota release ---------- */
+test('media.release: frees ownership only, protects live refs and authored assignments', async () => {
+  const a = await registerUser('Release A')
+  const b = await registerUser('Release B')
+  const gif = gifBytes(77)
+  const { json: up } = await upload(a.token, gif, 'image/gif')
+  const h = up.h
+  const put = async (tok, media) => call('PUT', '/api/data', { token: tok, body: { state: { unit: 'kg', routines: media ? [{ id: 'r1', ex: [{ id: '0025', mediaRef: { h, e: 'gif' } }] }] : [], workouts: [], customEx: [] } } })
+  const ownersOf = () => JSON.parse(fs.readFileSync(path.join(TMP, 'media', 'index.json'), 'utf8'))[h].owners
+  // referenced in their own state → nothing released
+  await put(a.token, true)
+  assert.deepEqual(await (await fetch(BASE + '/api/media/release', { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: `gymsid=${a.token}` }, body: '{}' })).json(), { released: 0 })
+  // ref removed → released once; a second call is a no-op (idempotent)
+  await put(a.token, false)
+  const rel = await fetch(BASE + '/api/media/release', { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: `gymsid=${a.token}` }, body: '{}' })
+  assert.deepEqual(await rel.json(), { released: 1 })
+  assert.deepEqual(await (await fetch(BASE + '/api/media/release', { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: `gymsid=${a.token}` }, body: '{}' })).json(), { released: 0 })
+  // the file is untouched and a second owner keeps it alive
+  assert.equal(fs.existsSync(path.join(TMP, 'media', `${h}.gif`)), true)
+  // co-owned: B uploads the same bytes, both own it; A's release earlier only removed A…
+  const upB = await upload(b.token, gif, 'image/gif')
+  assert.equal(upB.json.h, h)
+  assert.deepEqual(ownersOf(), [b.id])   // a already released above
+  // …and B still referencing it keeps it
+  await put(b.token, true)
+  assert.deepEqual(await (await fetch(BASE + '/api/media/release', { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: `gymsid=${b.token}` }, body: '{}' })).json(), { released: 0 })
+  // an assignment AUTHORED by the uploader keeps their ownership even without a state ref
+  const at = await admin()
+  await call('POST', '/api/admin/user/role', { token: at, body: { id: b.id, role: 'coach' } })
+  await call('POST', '/api/admin/user/coach', { token: at, body: { id: a.id, coachId: b.id } })
+  await call('PUT', '/api/coach/assignment', { token: b.token, body: { memberId: a.id, routines: [{ id: 'rc', name: 'Plan', ex: [{ id: '0025', mediaRef: { h, e: 'gif' } }] }], week: {} } })
+  await put(b.token, false)
+  assert.deepEqual(await (await fetch(BASE + '/api/media/release', { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: `gymsid=${b.token}` }, body: '{}' })).json(), { released: 0 })
+  assert.ok(ownersOf().includes(b.id))
+  // no session → 401
+  assert.equal((await fetch(BASE + '/api/media/release', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401)
+})
+
+test('media.release: freeing the quota lets a new upload through', async () => {
+  process.env.MEDIA_MAX_FILES = '1'
+  try {
+    const a = await registerUser('Quota Again')
+    const g1 = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(5, 1)])
+    const g2 = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(5, 2)])
+    assert.equal((await upload(a.token, g1, 'image/gif')).status, 200)
+    assert.equal((await upload(a.token, g2, 'image/gif')).status, 413)  // 1-file quota full
+    // the state never referenced g1 → one release frees the owner claim
+    const rel = await fetch(BASE + '/api/media/release', { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: `gymsid=${a.token}` }, body: '{}' })
+    assert.deepEqual(await rel.json(), { released: 1 })
+    assert.equal((await upload(a.token, g2, 'image/gif')).status, 200)
+  } finally {
+    delete process.env.MEDIA_MAX_FILES
+    delete process.env.MEDIA_MAX_BYTES
+  }
+})
+
 /* ---------- media tooling: gc-media.mjs and inline-media.mjs ---------- */
 test('media.gc coverage: coach-only refs, disabled-user state, orphans and missing files', { timeout: 30000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-gc-'))

@@ -8,7 +8,7 @@ import { nextSync } from '../lib/sync-status.js'
 import {
   pushWithMerge, mergeStates, normalizeState, topLevelHashes, withNewEpoch, resolveMerge
 } from '../lib/sync-merge.js'
-import { migrateStateMedia, uploadMedia } from '../lib/media.js'
+import { migrateStateMedia, uploadMedia, mediaHashesOf } from '../lib/media.js'
 
 const KEY = 'gym_state_v1'
 const BASE_KEY = 'gym_sync_base'        // {rev, hashes} — the last state both sides agreed on
@@ -186,6 +186,7 @@ export const useStore = create((set, get) => {
     async pushState() {
       if (!get().user) return
       clearTimeout(pushTm)
+      const mediaBefore = mediaHashesOf(get().S)   // quota release check runs after success
       set({ sync: nextSync(get().sync, { type: 'send' }) })
       const r = await pushWithMerge({
         getBase: readSyncBase,
@@ -214,6 +215,12 @@ export const useStore = create((set, get) => {
       if (r.ok) {
         localStorage.removeItem('gym_dirty')
         set({ sync: nextSync(get().sync, { type: 'success', at: Date.now() }) })
+        // a push that dropped or replaced a media reference frees this profile's claim on
+        // the old blob — fire-and-forget, silent failure, sync logic untouched
+        const after = mediaHashesOf(get().S)
+        let dropped = false
+        for (const h of mediaBefore) if (!after.has(h)) dropped = true
+        if (dropped) api('/api/media/release', { method: 'POST', body: '{}' }).catch(() => {})
       } else if (r.conflict) {
         localStorage.setItem('gym_dirty', '1')
         set({ sync: nextSync(get().sync, { type: 'conflict' }), syncConflict: r })

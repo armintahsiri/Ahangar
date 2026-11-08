@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mediaRefOf, mediaSrc, dataUrlToBytes, uploadMedia, migrateStateMedia, exportInlineMedia } from './media.js'
+import { mediaRefOf, mediaSrc, dataUrlToBytes, uploadMedia, migrateStateMedia, exportInlineMedia, mediaHashesOf } from './media.js'
 import { mergeStates } from './sync-merge.js'
 import { hashKey } from './sync-merge.js'
 
@@ -112,6 +112,20 @@ describe('migrateStateMedia', () => {
     expect(epochConflict).toBe(false)
     expect(conflicts).toEqual([])
     expect(merged.routines[0].ex[0].mediaRef).toEqual({ h: H1, e: 'gif' })
+  })
+})
+
+describe('mediaHashesOf', () => {
+  it('collects referenced hashes from routines and customs, skipping inline media', () => {
+    const s = {
+      routines: [
+        { id: 'r1', ex: [{ id: '0025', mediaRef: { h: H1, e: 'gif' } }, { id: '0043', gifData: GIF_URL }] },
+        { id: 'r2', ex: [] }
+      ],
+      customEx: [{ id: 'c1', mediaRef: { h: H2, e: 'mp4' } }]
+    }
+    expect([...mediaHashesOf(s)].sort()).toEqual([H1, H2].sort())
+    expect(mediaHashesOf({}).size).toBe(0)
   })
 })
 

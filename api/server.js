@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import webpush from 'web-push';
+import { refsForUid } from './media-refs.mjs';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -735,6 +736,32 @@ const routes = {
     }
     saveMediaIndex();
     json(res, 200, { h: hash, e: kind, size: buf.length });
+  },
+
+  // Free a member's media quota: drop their ownership from every blob their own data no
+  // longer references (their state + assignments they authored as a coach — the shared
+  // scanner). No file is ever deleted here; only gc-media removes files. Idempotent.
+  'POST /api/media/release': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const ip = clientIp(req);
+    const relKey = `mediarel:${ip}`;
+    if (bucketBlocked(relKey, mediaEnvMax('MEDIA_UPLOAD_IP_MAX', 60), REGISTER_WINDOW)) {
+      warnThrottle(ip);
+      return json(res, 429, { error: 'too many requests — try again later' });
+    }
+    bucketHit(relKey, REGISTER_WINDOW);
+    let keep;
+    try { keep = refsForUid(DATA, user.id); }
+    catch (e) { console.error('POST /api/media/release', e.message); return json(res, 500, { error: 'could not scan media references' }); }
+    let released = 0;
+    for (const [h, m] of Object.entries(mediaIndex)) {
+      if (!(m.owners || []).includes(user.id) || keep.has(h)) continue;
+      m.owners = m.owners.filter(o => o !== user.id);
+      released++;
+    }
+    if (released) saveMediaIndex();
+    json(res, 200, { released });
   },
 
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
