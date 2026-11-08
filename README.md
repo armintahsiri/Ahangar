@@ -206,6 +206,10 @@ npm install
 npm run dev
 ```
 
+⚠ `npm run dev` uses the same default `./data` folder as the Docker deployment. Do not run the
+dev stack and `docker compose` against the same checkout at the same time — both would write
+`db.json` (set `DATA_DIR` for one of them if you need both).
+
 Open **http://localhost:5173**. The root dev command starts the React frontend, API, and local
 exercise-media server together. Local API data is stored in `./data`.
 
@@ -227,6 +231,10 @@ openGym is a PWA. Open the deployed HTTPS website, then:
 - **Desktop Chrome/Edge:** use the install icon in the address bar.
 
 For secure sign-in over the internet, use an HTTPS domain. Plain HTTP on a trusted local network can be used for testing; guest mode stores data only in that browser.
+
+On **iOS, Web Push needs iOS 16.4 or later** and only works once openGym has been installed to
+the Home Screen (per the Safari steps above) — inside a regular Safari tab the toggle will not
+appear.
 
 ## AI-assisted setup prompt
 

@@ -234,6 +234,9 @@ export default function Settings() {
       <Row icon="lightbulb" iconTint="var(--yellow)"
         title={IS_ANDROID ? t('In Chrome: ⋮ menu → Add to Home screen') : t('In Safari: Share → Add to Home Screen')}
         subtitle={t('to install openGym as a full-screen app.') + ' ' + (user ? t('Your data syncs with your profile — sign in anywhere to see it.') : t('Guest data stays on this device — export a backup now and then!'))} />
+      {!IS_ANDROID && <Row icon="bell" iconTint="var(--pink)"
+        title={t('Web Push on iOS needs iOS 16.4 or later')}
+        subtitle={t('and only works once openGym is installed to the Home Screen — in a regular Safari tab the toggle will not appear.')} />}
     </Section>}
 
     <div className="dim small" style={{ textAlign: 'center', marginTop: 4, lineHeight: 1.6 }}>

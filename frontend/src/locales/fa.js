@@ -507,5 +507,9 @@ export default {
   "You can see each client's logged workouts — sets, weights, effort and the body-weight reading taken at the session — plus the plan you assigned them. You cannot see their weigh-in log, settings or mobile number.": "برای هر عضو، تمرین‌های ثبت‌شده‌ی او را می‌بینید — ست‌ها، وزن‌ها، زحمت و وزن بدنی که در همان جلسه ثبت شده — به‌علاوه‌ی برنامه‌ای که برایش تخصیص داده‌اید. دفتر وزن بدن، تنظیمات و شماره‌ی موبایل او برای شما دیده نمی‌شود.",
 
   // --- لایسنس ---
-  "names & instructions MIT · images & GIFs © Gym visual (gymvisual.com)": "نام‌ها و دستورالعمل‌ها MIT · تصاویر و GIFها © Gym visual (gymvisual.com)"
+  "names & instructions MIT · images & GIFs © Gym visual (gymvisual.com)": "نام‌ها و دستورالعمل‌ها MIT · تصاویر و GIFها © Gym visual (gymvisual.com)",
+
+  // --- یادآور iOS ---
+  "Web Push on iOS needs iOS 16.4 or later": "اعلان Web Push در iOS به نسخه‌ی 16.4 به بعد نیاز دارد",
+  "and only works once openGym is installed to the Home Screen — in a regular Safari tab the toggle will not appear.": "و فقط وقتی کار می‌کند که openGym روی Home Screen نصب شده باشد — در تب معمولی Safari سوییچ اعلان‌ها ظاهر نمی‌شود."
 }

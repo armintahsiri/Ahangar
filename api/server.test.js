@@ -481,6 +481,33 @@ test('throttle.prune drops expired buckets and the map is size-capped', () => {
   _buckets.clear()
 })
 
+/* ---------- operator tooling: scripts/reset-password.mjs ---------- */
+test('reset-password script: rehashes, bumps sv, old password dies, new one works', { timeout: 30000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-reset-'))
+  const u = { id: 'u-reset', name: 'Locked Out', phone: '+989130000777', password: pwRecord('oldpassword1'), created: new Date().toISOString() }
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({
+    users: [u, { id: 'u-admin', name: 'Owner', phone: '+989120000001', password: pwRecord('adminpass123'), created: new Date().toISOString() }],
+    creds: [], subs: [], invites: [], coachLinks: [], coachAssignments: []
+  }))
+  const script = path.join(HERE, '..', 'scripts', 'reset-password.mjs')
+  const r = spawnSync(process.execPath, [script, '--data', dir, '--phone', '09130000777'], {
+    cwd: HERE, encoding: 'utf8', input: 'fresh-password2\n', timeout: 15000,
+    env: { ...process.env, DATA_DIR: dir }
+  })
+  assert.equal(r.status, 0, `script failed: ${r.stderr || r.stdout}`)
+  assert.match(r.stdout, /Password replaced/)
+  const dbAfter = JSON.parse(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'))
+  const edited = dbAfter.users.find(x => x.id === 'u-reset')
+  assert.notEqual(edited.password.hash, u.password.hash)
+  assert.equal(edited.sv, 1)
+  // a fresh server against the same dir: old password rejected, new one accepted
+  const s = await spawnWith({ DATA_DIR: dir })
+  try {
+    assert.equal((await s.c('POST', '/api/login', { body: { phone: '+989130000777', password: 'oldpassword1' } })).status, 401)
+    assert.equal((await s.c('POST', '/api/login', { body: { phone: '+989130000777', password: 'fresh-password2' } })).status, 200)
+  } finally { s.cleanup() }
+})
+
 /* ---------- sync versioning (rev / baseRev) ---------- */
 test('sync.put-baserev-roundtrip', async () => {
   const u = await registerUser('Rev Rider')
