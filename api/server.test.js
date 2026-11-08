@@ -35,7 +35,7 @@ process.env.DATA_DIR = TMP
 process.env.ADMIN_UIDS = 'u-admin,u-admin2'
 // INVITE_ONLY stays off for the shared in-process server; the invite suite spawns its own child.
 
-const { createServer, reminderDue } = await import('./server.js')
+const { createServer, reminderDue, _setPasswordVerifier, passwordMatches } = await import('./server.js')
 const server = createServer()
 await new Promise(resolve => server.listen(0, resolve))
 const BASE = `http://127.0.0.1:${server.address().port}`
@@ -58,6 +58,18 @@ async function call(method, url, { body, token, base = BASE } = {}) {
   try { json = await res.json() } catch { /* no body */ }
   const fresh = (res.headers.get('set-cookie') || '').match(/gymsid=([^;]*)/)?.[1] || null
   return { status: res.status, json, token: fresh }
+}
+
+// raw variant for header-level tests (Origin, X-Forwarded-For, …)
+async function raw(method, url, { body, token, headers = {}, base = BASE } = {}) {
+  const res = await fetch(base + url, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { cookie: `gymsid=${token}` } : {}), ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  })
+  let json = null
+  try { json = await res.json() } catch { /* no body */ }
+  return { status: res.status, json }
 }
 
 async function registerUser(name, password = 'password123') {
@@ -337,6 +349,42 @@ test('state.corrupt-db-fails-fast', () => {
     assert.equal(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'), '{corrupt')
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* fine */ }
+  }
+})
+
+/* ---------- origin guard + login timing ---------- */
+test('origin.guard: state-changing verbs refuse foreign origins, GET never refused', async () => {
+  const u = await registerUser('Origin Guard')
+  const evil = { origin: 'https://evil.example' }
+  assert.equal((await raw('POST', '/api/login', { headers: evil, body: { phone: u.phone, password: u.password } })).status, 403)
+  assert.equal((await raw('PUT', '/api/data', { headers: evil, token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })).status, 403)
+  assert.equal((await raw('DELETE', '/api/nothing', { headers: evil, token: u.token })).status, 403)
+  // GET is read-only — never refused, foreign origin or not
+  assert.equal((await raw('GET', '/api/health', { headers: evil })).status, 200)
+  // allowed: no Origin at all (curl / tools)
+  assert.equal((await raw('POST', '/api/login', { body: { phone: u.phone, password: 'wrong-pass' } })).status, 401)
+  // allowed: exact ORIGIN match (the default test ORIGIN is http://localhost:8080)
+  assert.equal((await raw('POST', '/api/login', { headers: { origin: 'http://localhost:8080' }, body: { phone: u.phone, password: u.password } })).status, 200)
+  // allowed: same-host origin (direct LAN access — Origin host === Host header)
+  const port = BASE.split(':').pop()
+  assert.equal((await raw('POST', '/api/login', { headers: { origin: `http://127.0.0.1:${port}` }, body: { phone: u.phone, password: u.password } })).status, 200)
+})
+
+test('login.timing: unknown phone runs the same one scrypt verification as a wrong password', async () => {
+  const calls = { n: 0 }
+  _setPasswordVerifier((pw, rec) => { calls.n++; return passwordMatches(pw, rec) })
+  try {
+    const u = await registerUser('Timing Tom')
+    calls.n = 0
+    assert.equal((await call('POST', '/api/login', { body: { phone: u.phone, password: 'wrong-pass' } })).status, 401)
+    const known = calls.n
+    calls.n = 0
+    assert.equal((await call('POST', '/api/login', { body: { phone: nextPhone(), password: 'wrong-pass' } })).status, 401)
+    const unknown = calls.n
+    assert.equal(known, 1, 'wrong password must run exactly one scrypt verification')
+    assert.equal(unknown, 1, 'unknown phone must run exactly one scrypt verification')
+  } finally {
+    _setPasswordVerifier() // restore the real verifier for the remaining suites
   }
 })
 

@@ -320,6 +320,7 @@ function normalizePhone(input) {
   if (/^9\d{9}$/.test(phone)) phone = '+98' + phone;
   return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : null;
 }
+export { normalizePhone, passwordRecord, passwordMatches, atomicWrite };
 function passwordRecord(password) {
   const salt = crypto.randomBytes(16);
   return { salt: salt.toString('base64url'), hash: crypto.scryptSync(password, salt, 64).toString('base64url') };
@@ -330,6 +331,24 @@ function passwordMatches(password, record) {
     const expected = Buffer.from(record.hash, 'base64url');
     return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
   } catch { return false; }
+}
+// A precomputed record so a login for an unknown phone runs the same scrypt work as a wrong
+// password — response time must not reveal which numbers have accounts.
+const DUMMY_PASSWORD = passwordRecord(crypto.randomBytes(32).toString('hex'));
+// Swappable only so tests can count verifications instead of timing clocks; production always
+// calls the real one unless a test replaces it (and restores it).
+let verifyPassword = passwordMatches;
+export function _setPasswordVerifier(fn = passwordMatches) { verifyPassword = fn }
+
+// Cross-site request guard: state-changing verbs must come from this app's own origin. An
+// absent Origin (curl, server-to-server) passes; a matching ORIGIN or a same-Host origin
+// passes (dev servers and direct LAN access never know ORIGIN). GET/HEAD are never refused.
+function originAllowed(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  if (ORIGIN && String(o).replace(/\/$/, '') === ORIGIN.replace(/\/$/, '')) return true;
+  try { return new URL(o).host === req.headers.host; }
+  catch { return false; }
 }
 const authAttempts = new Map();
 function blockedAuth(key) {
@@ -391,7 +410,11 @@ const routes = {
     const phone = normalizePhone(body.phone), key = `${req.socket.remoteAddress || 'unknown'}:${phone || String(body.phone || '').slice(0, 40)}`;
     if (blockedAuth(key)) return json(res, 429, { error: 'too many sign-in attempts — try again in 15 minutes' });
     const user = db.users.find(u => u.phone === phone);
-    if (!user || !user.password || !passwordMatches(String(body.password || ''), user.password)) {
+    // one scrypt run either way — an unknown number burns the same time as a wrong password
+    // (the verify deliberately runs even when the user is missing — no short-circuit)
+    const record = (user && user.password) ? user.password : DUMMY_PASSWORD;
+    const ok = verifyPassword(String(body.password || ''), record);
+    if (!user || !ok) {
       failAuth(key); return json(res, 401, { error: 'mobile number or password is incorrect' });
     }
     if (user.disabled) return json(res, 403, { error: 'this account has been disabled' });
@@ -790,6 +813,10 @@ const routes = {
 export function createServer() {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
+    // cross-site state-changing requests are refused before anything else runs
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !originAllowed(req)) {
+      return json(res, 403, { error: 'cross-origin request refused' });
+    }
     const key = req.method + ' ' + url.pathname;
     const handler = routes[key];
     if (!handler) return json(res, 404, { error: 'not found' });

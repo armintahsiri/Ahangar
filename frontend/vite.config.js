@@ -13,7 +13,9 @@ export default defineConfig({
     port: Number(process.env.FRONTEND_PORT || 5173),
     strictPort: true,
     proxy: {
-      '/api': { target: backend, changeOrigin: true },
+      // changeOrigin: false for /api — the API checks the Origin host against Host, and
+      // rewriting Host to the backend target would 403 dev access from LAN IPs
+      '/api': { target: backend, changeOrigin: false },
       '/img': { target: media, changeOrigin: true },
       '/gif': { target: media, changeOrigin: true }
     }
