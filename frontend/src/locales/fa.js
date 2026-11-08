@@ -511,5 +511,10 @@ export default {
 
   // --- یادآور iOS ---
   "Web Push on iOS needs iOS 16.4 or later": "اعلان Web Push در iOS به نسخه‌ی 16.4 به بعد نیاز دارد",
-  "and only works once openGym is installed to the Home Screen — in a regular Safari tab the toggle will not appear.": "و فقط وقتی کار می‌کند که openGym روی Home Screen نصب شده باشد — در تب معمولی Safari سوییچ اعلان‌ها ظاهر نمی‌شود."
+  "and only works once openGym is installed to the Home Screen — in a regular Safari tab the toggle will not appear.": "و فقط وقتی کار می‌کند که openGym روی Home Screen نصب شده باشد — در تب معمولی Safari سوییچ اعلان‌ها ظاهر نمی‌شود.",
+
+  // --- مدیای شخصی ---
+  "Upload failed — the media stays on this device for now.": "آپلود ناموفق بود — مدیا فعلاً روی همین دستگاه می‌ماند.",
+  "{0} media moved to the server": "{0} مدیا به سرور منتقل شد",
+  "Backup exported — {0} media file(s) could not be embedded and stay as references.": "پشتیبان گرفته شد — {0} فایل مدیا درون‌ریزی نشد و به‌صورت ارجاع باقی ماند."
 }

@@ -10,6 +10,7 @@ import { wakeLockSupported } from '../lib/wakelock.js'
 import { t, LANGS, INSTR_LANGS, dateLocale } from '../lib/i18n.js'
 import { describeSync } from '../lib/sync-status.js'
 import { withNewEpoch } from '../lib/sync-merge.js'
+import { exportInlineMedia } from '../lib/media.js'
 import { readDiscardedBackup } from '../store/useStore.js'
 import { DEMO, REPO } from '../lib/demo.js'
 import { MOBILE, shareExport, syncReminder } from '../lib/mobile.js'
@@ -31,7 +32,10 @@ export default function Settings() {
   const [discarded, setDiscarded] = useState(() => readDiscardedBackup())
 
   const doExport = async () => {
-    const json = JSON.stringify(S, null, 2)
+    // server-referenced media is fetched and inlined, so a backup stays self-contained;
+    // a blob that cannot be read keeps its reference and is called out at the end
+    const { state: exportState, failed } = await exportInlineMedia(useStore.getState().S)
+    const json = JSON.stringify(exportState, null, 2)
     const name = 'opengym-backup-' + todayISO() + '.json'
     // WKWebView can't download blob URLs — the native build hands the file to the share sheet.
     if (MOBILE) {
@@ -40,7 +44,7 @@ export default function Settings() {
     }
     const blob = new Blob([json], { type: 'application/json' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href)
-    toast(t('Backup exported'))
+    toast(failed.length ? t('Backup exported — {0} media file(s) could not be embedded and stay as references.', failed.length) : t('Backup exported'))
   }
   const doImport = ev => {
     const f = ev.target.files[0]; if (!f) return

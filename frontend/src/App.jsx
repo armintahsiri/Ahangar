@@ -4,7 +4,7 @@ import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { bindUI } from './components/ui.jsx'
 import { ACCENTS } from './lib/format.js'
-import { directionFor, setLang, useLang } from './lib/i18n.js'
+import { directionFor, setLang, useLang, t } from './lib/i18n.js'
 import { DEMO } from './lib/demo.js'
 import { MOBILE } from './lib/mobile.js'
 import { setNav } from './lib/nav.js'
@@ -44,6 +44,7 @@ function Shell() {
   const { S, user, ready, clubName } = useStore()
   const isGuest = useStore(s => s.isGuest())
   const syncConflict = useStore(s => s.syncConflict)
+  const mediaMoved = useStore(s => s.mediaMoved)
   const langV = useLang()   // re-renders the whole shell when the language (pack) changes
   useEffect(() => { setNav(navigate) }, [navigate])
   useEffect(() => { applyPrefs(S.theme, S.accent) }, [S.theme, S.accent])
@@ -56,6 +57,8 @@ function Shell() {
   }, [langV, S.lang])
   // a sync conflict parks its details in the store — the decision sheet opens once per conflict
   useEffect(() => { if (syncConflict) syncConflictSheet() }, [syncConflict])
+  // the one-shot background media migration reports through the store (no useUI in the store)
+  useEffect(() => { if (mediaMoved > 0) useUI.getState().toast(t('{0} media moved to the server', mediaMoved)) }, [mediaMoved])
   // every tab/route change starts at the top of the page
   useEffect(() => { window.scrollTo(0, 0) }, [loc.pathname])
   // bound to the workout, not to the route — checking Stats mid-session keeps the screen on

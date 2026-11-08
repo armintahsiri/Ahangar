@@ -8,6 +8,7 @@ import { nextSync } from '../lib/sync-status.js'
 import {
   pushWithMerge, mergeStates, normalizeState, topLevelHashes, withNewEpoch, resolveMerge
 } from '../lib/sync-merge.js'
+import { migrateStateMedia, uploadMedia } from '../lib/media.js'
 
 const KEY = 'gym_state_v1'
 const BASE_KEY = 'gym_sync_base'        // {rev, hashes} — the last state both sides agreed on
@@ -91,6 +92,7 @@ export function withCoachProgram(base, remote) {
 export const useStore = create((set, get) => {
   let pushTm = null
   let saveTm = null
+  let mediaMigrated = false   // the background media migration runs at most once per session
 
   // Mobile build: mirror the state into a file in the app's data directory (survives WebView
   // storage eviction) and keep the native reminder schedule in step with the weekly plan.
@@ -157,6 +159,10 @@ export const useStore = create((set, get) => {
     storageError: false,
     // parked 409 details while the conflict sheet waits for a decision (non-persistent)
     syncConflict: null,
+    // server says MEDIA_MIGRATE=1 → the client may move inline media to /api/media
+    mediaMigrate: false,
+    // transient: how many items the one-shot background migration moved this session
+    mediaMoved: 0,
 
     // Mutate a draft of S via producer fn, then persist + schedule sync.
     update(mut, push = true) {
@@ -343,6 +349,21 @@ export const useStore = create((set, get) => {
       persist(withNewEpoch(Object.assign(clone(DEF), buildDemoState(), preferences)), true)
     },
 
+    // One ordered pass moving inline media (gifData / custom gif) to the server. Runs at most
+    // once per session, only on a healthy quiet sync, and its result goes through the normal
+    // update → push pipeline (baseRev + phase-2 merge) — never around it. The count lands in
+    // the transient mediaMoved field; App turns it into the toast (store can't import useUI).
+    async migrateMedia() {
+      if (mediaMigrated) return
+      const st = get()
+      if (DEMO || MOBILE || !st.user || !st.mediaMigrate) return
+      if (st.sync?.status !== 'synced' || localStorage.getItem('gym_dirty') === '1') return
+      mediaMigrated = true
+      const { state, migrated } = await migrateStateMedia(st.S, uploadMedia)
+      if (migrated > 0) get().update(s => { Object.assign(s, state) })
+      set({ mediaMoved: migrated })
+    },
+
     // Boot: ask the server who we are, then pull.
     async boot() {
       // Mobile build: no backend either — restore from the file mirror (the durable copy;
@@ -374,7 +395,7 @@ export const useStore = create((set, get) => {
       localStorage.removeItem('gym_guest')
       try {
         const config = await api('/api/config')
-        set({ clubName: config.club_name || 'openGym' })
+        set({ clubName: config.club_name || 'openGym', mediaMigrate: !!config.media_migrate })
       } catch (e) { /* keep the default brand while the server is unavailable */ }
       try {
         const me = await api('/api/me')
@@ -392,6 +413,7 @@ export const useStore = create((set, get) => {
           set({ sync: nextSync(null, { type: 'reset' }) })
         }
       }
+      await get().migrateMedia()   // one ordered pass when the server opted in and sync is quiet
       const current = clone(get().S)
       if (clearLegacySampleReschedule(current)) get().replaceState(current, true)
       set({ ready: true })

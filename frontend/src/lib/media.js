@@ -74,3 +74,29 @@ export async function migrateStateMedia(state, uploadFn) {
   for (const c of next.customEx || []) await handle(c)
   return { state: next, migrated, failed }
 }
+
+// Backup independence: turn every server reference back into an inline data-URL so the
+// exported JSON stands alone. An item whose fetch fails keeps its reference and its hash is
+// reported — the backup stays valid, just not self-contained for that one file.
+export async function exportInlineMedia(state, fetchFn = fetch) {
+  const next = JSON.parse(JSON.stringify(state))
+  const failed = []
+  const inline = async (item, isCustom) => {
+    const ref = mediaRefOf(item)
+    if (!ref) return
+    try {
+      const res = await fetchFn(`/api/media/${ref.h}.${ref.e}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const buf = new Uint8Array(await res.arrayBuffer())
+      let bin = ''
+      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000))
+      const dataUrl = `data:${ref.e === 'gif' ? 'image/gif' : 'video/mp4'};base64,${btoa(bin)}`
+      if (isCustom) item.gif = dataUrl    // custom exercises keep their own field name
+      else item.gifData = dataUrl
+      delete item.mediaRef
+    } catch { failed.push(ref.h) }
+  }
+  for (const r of next.routines || []) for (const e of r.ex || []) await inline(e, false)
+  for (const c of next.customEx || []) await inline(c, true)
+  return { state: next, failed }
+}

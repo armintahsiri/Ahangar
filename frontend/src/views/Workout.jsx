@@ -10,6 +10,7 @@ import { t } from '../lib/i18n.js'
 import { api } from '../lib/api.js'
 import Media from '../components/Media.jsx'
 import { startFlow, exercisePicker, exConfigSheet, exerciseDetailSheet, topWeightSheet, finishWorkout, workoutCompleteSheet, confirmSheet } from '../sheets.jsx'
+import { mediaSrc } from '../lib/media.js'
 import Icon from '../components/Icon.jsx'
 import { Button, Check, NumberField } from '../components/ui.jsx'
 import { nextPrescription, applyPrescription } from '../lib/progression.js'
@@ -58,7 +59,9 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
   const working = useUI(s => s.work)
   const entry = S.active.entries[entryIdx]
   const ex = exOr(entry.id)
-  const mediaEx = entry.target?.gifData ? { ...ex, gif: entry.target.gifData } : ex
+  // the live session's media: whatever the entry target carries (server ref or inline)
+  const entryGif = mediaSrc(entry.target || {}) || ex.gif
+  const mediaEx = entryGif ? { ...ex, gif: entryGif } : ex
   const mode = modeOf({ ...(entry.target || {}), id: entry.id })
   const cardio = mode === 'cardio'
   const timed = mode === 'time'

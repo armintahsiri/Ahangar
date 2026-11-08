@@ -21,6 +21,7 @@ import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 import { addTombstone, removeTombstone, normalizeState, topLevelHashes, resolveMerge } from './lib/sync-merge.js'
+import { mediaSrc, mediaRefOf, uploadMedia } from './lib/media.js'
 import { withCoachProgram } from './store/useStore.js'
 
 const S = () => useStore.getState().S
@@ -368,6 +369,22 @@ function CustomExForm({ existing, prefill, onDone, close }) {
   const [bp, setBp] = useState(existing ? existing.bp : '')
   const [desc, setDesc] = useState(existing ? (existing.desc || '') : '')
   const [gif, setGif] = useState(existing ? (existing.gif || '') : '')
+  const [mediaRef, setMediaRef] = useState(existing?.mediaRef || null)
+  // MEDIA_MIGRATE on → the file goes to the server and the item keeps a small reference;
+  // any failure (offline, quota) falls back to inline base64 with a clear toast, and the
+  // background migration can move it later.
+  const onMediaPicked = async data => {
+    if (useStore.getState().mediaMigrate) {
+      try {
+        const r = await uploadMedia(data)
+        setMediaRef({ h: r.h, e: r.e })
+        setGif('')
+        return
+      } catch (e) { toast(t('Upload failed — the media stays on this device for now.') + ' (' + e.message + ')') }
+    }
+    setMediaRef(null)
+    setGif(data)
+  }
   const gifInput = useRef(null)
   const save = () => {
     const name = n.trim()
@@ -377,10 +394,10 @@ function CustomExForm({ existing, prefill, onDone, close }) {
     if (dup) { toast(t('“{0}” already exists', dup.n)); return }
     const d = desc.trim().slice(0, 1000)
     let id = existing && existing.id
-    if (existing) update(s => { const c = (s.customEx || []).find(x => x.id === id); if (c) { c.n = name; c.bp = bp; c.desc = d; c.gif = gif || undefined } })
+    if (existing) update(s => { const c = (s.customEx || []).find(x => x.id === id); if (c) { c.n = name; c.bp = bp; c.desc = d; c.gif = gif || undefined; if (mediaRef) c.mediaRef = mediaRef; else delete c.mediaRef } })
     else {
       id = 'c' + uid()
-      update(s => { (s.customEx = s.customEx || []).push({ id, n: name, bp, desc: d, tg: '', eq: 'custom', custom: true, ...(gif ? { gif } : {}) }) })
+      update(s => { (s.customEx = s.customEx || []).push({ id, n: name, bp, desc: d, tg: '', eq: 'custom', custom: true, ...(mediaRef ? { mediaRef } : gif ? { gif } : {}) }) })
     }
     close()
     toast(existing ? t('Saved') : t('“{0}” created', name))
@@ -395,9 +412,9 @@ function CustomExForm({ existing, prefill, onDone, close }) {
     </div>
     {bp === 'cardio' && <div className="small dim row" style={{ marginBottom: 10, gap: 5 }}><Icon name="figureRun" style={{ fontSize: 13 }} />{t('Cardio exercises log time + speed instead of weight × reps.')}</div>}
     <div className="row" style={{ gap: 8, margin: '12px 0 6px' }}>
-      <input ref={gifInput} type="file" accept="image/gif,video/mp4,.gif,.mp4" hidden onChange={e => { readExerciseMedia(e.target.files?.[0], setGif); e.target.value = '' }} />
+      <input ref={gifInput} type="file" accept="image/gif,video/mp4,.gif,.mp4" hidden onChange={e => { readExerciseMedia(e.target.files?.[0], onMediaPicked); e.target.value = '' }} />
       <Button icon="upload" variant="ghost" onClick={() => gifInput.current?.click()}>{gif ? t('Change GIF or MP4') : t('Add GIF or MP4')}</Button>
-      {gif && <Button variant="ghost" onClick={() => setGif('')}>{t('Remove media')}</Button>}
+      {gif && <Button variant="ghost" onClick={() => { setGif(''); setMediaRef(null) }}>{t('Remove media')}</Button>}
     </div>
     <div className="small dim" style={{ marginBottom: 10 }}>{t('GIF or MP4, up to 1 MB. It will be saved with this exercise.')}</div>
     {gif && <Media ex={{ id: existing?.id || 'custom-preview', n: n || t('Exercise preview'), gif }} />}
@@ -523,8 +540,23 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   // Both default from the dataset and are then whatever the config says — see isBw.
   const bw = !cardio && isBw({ ...c, id: ex.id })
   const perSide = isPerSide(c)
-  const setGifData = data => setC(x => ({ ...x, gifData: data }))
-  const mediaCfg = c.gifData ? { gifData: c.gifData } : ex.custom && ex.gif ? { gifData: ex.gif } : {}
+  const onMediaPicked = async data => {
+    if (useStore.getState().mediaMigrate) {
+      try {
+        const r = await uploadMedia(data)
+        setC(x => ({ ...x, mediaRef: { h: r.h, e: r.e }, gifData: undefined }))
+        return
+      } catch (e) { toast(t('Upload failed — the media stays on this device for now.') + ' (' + e.message + ')') }
+    }
+    setC(x => ({ ...x, mediaRef: undefined, gifData: data }))
+  }
+  // whatever the config now carries wins: a server reference, an inline copy, or the
+  // custom exercise's own media — exercised below by mediaSrc, not by the raw fields
+  const mediaCfg = c.mediaRef ? { mediaRef: c.mediaRef }
+    : c.gifData ? { gifData: c.gifData }
+    : mediaRefOf(ex) ? { mediaRef: ex.mediaRef }
+    : ex.gif ? { gifData: ex.gif } : {}
+  const hasMedia = !!(c.mediaRef || c.gifData || ex.mediaRef || ex.gif)
   // Keep whatever the other mode already had (sets, weight) and fill only what is missing.
   const setMode = m => setC(x => ({ ...defaultConfig(ex.id, m), ...x, mode: m }))
   const save = () => {
@@ -558,11 +590,11 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   }
   return <>
     <h3 className="capitalize">{ex.n}</h3>
-    <Media ex={{ ...ex, gif: c.gifData || ex.gif }} />
-    <input ref={gifInput} type="file" accept="image/gif,video/mp4,.gif,.mp4" hidden onChange={e => { readExerciseMedia(e.target.files?.[0], setGifData); e.target.value = '' }} />
+    <Media ex={{ ...ex, gif: mediaSrc(c) || ex.gif }} />
+    <input ref={gifInput} type="file" accept="image/gif,video/mp4,.gif,.mp4" hidden onChange={e => { readExerciseMedia(e.target.files?.[0], onMediaPicked); e.target.value = '' }} />
     <div className="row" style={{ gap: 8, margin: '8px 0 12px' }}>
-      <Button icon="upload" variant="ghost" onClick={() => gifInput.current?.click()}>{c.gifData ? t('Change GIF or MP4') : t('Add GIF or MP4')}</Button>
-      {c.gifData && <Button variant="ghost" onClick={() => setC(x => { const next = { ...x }; delete next.gifData; return next })}>{t('Remove media')}</Button>}
+      <Button icon="upload" variant="ghost" onClick={() => gifInput.current?.click()}>{hasMedia ? t('Change GIF or MP4') : t('Add GIF or MP4')}</Button>
+      {hasMedia && <Button variant="ghost" onClick={() => setC(x => { const next = { ...x }; delete next.gifData; delete next.mediaRef; return next })}>{t('Remove media')}</Button>}
     </div>
     <div className="small dim" style={{ marginBottom: 12 }}>{t('GIF or MP4, up to 1 MB. It will be saved with this exercise.')}</div>
     <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '10px 0 14px' }}>

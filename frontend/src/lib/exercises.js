@@ -32,7 +32,8 @@ export const allExercises = st => [...(st.customEx || []), ...EXDB]
 const IMG_BASE = import.meta.env.VITE_IMG_BASE || 'img/'
 const GIF_BASE = import.meta.env.VITE_GIF_BASE || 'gif/'
 export const imgSrc = ex => IMG_BASE + ex.img
-export const gifSrc = ex => /^(data:|https?:\/\/)/i.test(ex.gif || '') ? ex.gif : GIF_BASE + ex.gif
+// leading "/" = same-origin media served by the API (see lib/media.js) — never prefixed
+export const gifSrc = ex => /^(data:|https?:\/\/|\/)/i.test(ex.gif || '') ? ex.gif : GIF_BASE + ex.gif
 export const isVideoMedia = ex => /^data:video\//i.test(ex.gif || '') || /\.mp4(?:$|[?#])/i.test(ex.gif || '')
 
 // Cardio exercises log time + speed instead of weight × reps.

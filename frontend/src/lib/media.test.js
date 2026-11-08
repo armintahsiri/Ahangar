@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mediaRefOf, mediaSrc, dataUrlToBytes, uploadMedia, migrateStateMedia } from './media.js'
+import { mediaRefOf, mediaSrc, dataUrlToBytes, uploadMedia, migrateStateMedia, exportInlineMedia } from './media.js'
 import { mergeStates } from './sync-merge.js'
 import { hashKey } from './sync-merge.js'
 
@@ -112,5 +112,43 @@ describe('migrateStateMedia', () => {
     expect(epochConflict).toBe(false)
     expect(conflicts).toEqual([])
     expect(merged.routines[0].ex[0].mediaRef).toEqual({ h: H1, e: 'gif' })
+  })
+})
+
+describe('exportInlineMedia — self-contained backups', () => {
+  const refState = {
+    routines: [{ id: 'r1', ex: [{ id: '0025', mediaRef: { h: H1, e: 'gif' } }, { id: '0043', sets: 2 }] }],
+    customEx: [{ id: 'c1', n: 'Mine', mediaRef: { h: H2, e: 'mp4' } }]
+  }
+  const bytes = n => new Uint8Array(n).map((_, i) => i % 251)
+  it('inlines references so the backup is self-contained', async () => {
+    const fetchFn = async url => {
+      const h = url.includes(H1) ? bytes(40) : bytes(20)
+      return { ok: true, arrayBuffer: async () => h.buffer }
+    }
+    const { state, failed } = await import('./media.js').then(m => m.exportInlineMedia(refState, fetchFn))
+    expect(failed).toEqual([])
+    expect(state.routines[0].ex[0].gifData).toMatch(/^data:image\/gif;base64,/)
+    expect(state.routines[0].ex[0].mediaRef).toBeUndefined()
+    expect(state.customEx[0].gif).toMatch(/^data:video\/mp4;base64,/)
+    expect(state.routines[0].ex[1]).toEqual({ id: '0043', sets: 2 })
+  })
+  it('a failed fetch keeps the reference and reports the hash', async () => {
+    const fetchFn = async url => url.includes(H1) ? { ok: true, arrayBuffer: async () => bytes(8).buffer } : { ok: false, status: 404 }
+    const { state, failed } = await import('./media.js').then(m => m.exportInlineMedia(refState, fetchFn))
+    expect(failed).toEqual([H2])
+    expect(state.routines[0].ex[0].gifData).toMatch(/^data:image\/gif;base64,/)
+    expect(state.customEx[0].mediaRef).toEqual({ h: H2, e: 'mp4' }) // untouched
+  })
+})
+
+describe('state size — inline vs reference (3 × ~800 KB gifs)', () => {
+  it('migration shrinks the synced state by orders of magnitude', async () => {
+    const big = 'data:image/gif;base64,' + btoa('x'.repeat(800 * 1024))
+    const st = { unit: 'kg', routines: [{ id: 'r1', ex: [{ id: '0025', gifData: big }, { id: '0043', gifData: big }, { id: '0085', gifData: big }] }], customEx: [] }
+    const before = JSON.stringify(st).length
+    const { state } = await migrateStateMedia(st, async () => ({ h: H1, e: 'gif' }))
+    const after = JSON.stringify(state).length
+    expect(after).toBeLessThan(before / 100)
   })
 })
