@@ -321,7 +321,8 @@ mobile app is the install-and-done flavor.
 ## Your data
 
 Lives in `./data` on your host: `db.json` (profiles + password hashes), `state-<user>.json`
-(each user's plan, workouts, body weight, settings), and `secret` (the session-cookie key).
+(each user's plan, workouts, body weight, settings), `secret` (the session-cookie key), and
+`media/` (personal exercise GIFs/MP4s, served by hash).
 **Back up `./data` and you've backed up everything.** Passwords are stored as one-way hashes.
 
 ## Configuration
