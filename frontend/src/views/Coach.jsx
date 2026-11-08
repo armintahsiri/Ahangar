@@ -7,12 +7,13 @@ import { DAYN } from '../lib/format.js'
 import { EXIDX } from '../lib/exercises.js'
 import { setLabel } from '../lib/history.js'
 import { loadOfRoutine, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
-import { t } from '../lib/i18n.js'
+import { t, getLang } from '../lib/i18n.js'
 import Icon from '../components/Icon.jsx'
 import BodyMap from '../components/BodyMap.jsx'
 import MuscleBalance from '../components/MuscleBalance.jsx'
 import { Button } from '../components/ui.jsx'
 import { exCount } from '../lib/format.js'
+import { exName } from '../lib/exnames.js'
 
 const DAYS = [6, 0, 1, 2, 3, 4, 5]
 const emptyWeek = () => Object.fromEntries(DAYS.map(d => [String(d), 'rest']))
@@ -178,7 +179,7 @@ export default function Coach() {
               const completed = (entry.sets || []).filter(s => s.done)
               const exercise = EXIDX[entry.id]
               return <div key={i} style={{ padding: '7px 0', borderTop: '1px solid var(--sep)' }}>
-                <div className="row between"><span className="tt capitalize">{exercise?.n || entry.id}</span><span className="tag">{t('{0} of {1} sets', completed.length, entry.sets?.length || 0)}</span></div>
+                <div className="row between"><span className="tt capitalize">{exercise ? exName(exercise, getLang()) : entry.id}</span><span className="tag">{t('{0} of {1} sets', completed.length, entry.sets?.length || 0)}</span></div>
                 <div className="ss" style={{ marginTop: 3 }}>{(entry.sets || []).map((s, n) => `${s.done ? '✓' : '–'} ${t('Set')} ${n + 1}: ${s.done ? setLabel(entry.id, s, entry.target) : t('Not completed')}`).join(' · ')}</div>
               </div>
             })}</div>

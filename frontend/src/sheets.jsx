@@ -22,6 +22,7 @@ import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLIC
 import { MOBILE, shareExport } from './lib/mobile.js'
 import { addTombstone, removeTombstone, normalizeState, topLevelHashes, resolveMerge } from './lib/sync-merge.js'
 import { mediaSrc, mediaRefOf, uploadMedia } from './lib/media.js'
+import { exName, exEnglishName, matchEx } from './lib/exnames.js'
 import { withCoachProgram } from './store/useStore.js'
 
 const S = () => useStore.getState().S
@@ -308,7 +309,8 @@ function ExerciseDetail({ ex, close }) {
   const last = lastEntryFor(st, ex.id)
   const best = bestWeightFor(st, ex.id)
   return <>
-    <h3 className="capitalize">{ex.n}</h3>
+    <h3 className="capitalize">{exName(ex, getLang())}</h3>
+    {exEnglishName(ex, getLang()) && <div className="dim small" style={{ marginTop: -6, marginBottom: 8 }}>{exEnglishName(ex, getLang())}</div>}
     <Media ex={ex} />
     <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '10px 0' }}>
       <span className="tag acc">{t(ex.bp)}</span>
@@ -347,7 +349,7 @@ function AddToRoutine({ ex, close }) {
     }, null, isNew ? null : st.routines.find(x => x.id === rid))
   }
   return <>
-    <h3 className="capitalize">{t('Add “{0}”', ex.n)}</h3>
+    <h3 className="capitalize">{t('Add “{0}”', exName(ex, getLang()))}</h3>
     <div className="muted small" style={{ marginBottom: 12 }}>{t('Pick a routine — sets, reps & weight come next.')}</div>
     <div className="list">
       {st.routines.filter(r => !r.coachManaged).map(r => <div key={r.id} className="item" onClick={() => pick(r.id)}>
@@ -430,7 +432,7 @@ export const customExSheet = (existing, onDone, prefill) => ui().openSheet(close
 export function deleteCustomEx(ex, afterDelete) {
   if (S().active?.entries.some(e => e.id === ex.id)) { toast(t('Finish your current workout first')); return }
   confirmSheet({
-    title: t('Delete “{0}”?', ex.n),
+    title: t('Delete “{0}”?', exName(ex, getLang())),
     message: t('It will be removed from your routines. Already-logged workouts keep their sets.'),
     confirmText: t('Delete'), danger: true,
     onConfirm: () => {
@@ -466,8 +468,8 @@ function ExercisePicker({ onPick, close }) {
   const all = allExercises(st)
   let base = all.filter(e =>
     (bp === '★' ? usage[e.id] : (!bp || e.bp === bp)) &&
-    (!ql || e.n.toLowerCase().includes(ql) || e.tg.includes(ql) || e.eq.includes(ql) || (e.desc || '').toLowerCase().includes(ql)))
-  if (bp === '★') base = [...base].sort((a, b) => (usage[b.id] - usage[a.id]) || (a.n < b.n ? -1 : 1))
+    (!ql || matchEx(e, q)))
+  if (bp === '★') base = [...base].sort((a, b) => (usage[b.id] - usage[a.id]) || exName(a, getLang()).localeCompare(exName(b, getLang()), getLang() === 'fa' ? 'fa' : 'en'))
   const eqOpts = equipmentOf(base)
   // Drop the equipment filter if the search narrowed it away, so you never hit a dead end.
   const eqOn = eqOpts.includes(eq) ? eq : ''
@@ -492,7 +494,7 @@ function ExercisePicker({ onPick, close }) {
         <div className="grow"><div className="tt">{t('Create your own exercise')}</div><div className="ss">{t('name + body part, no animation')}</div></div><Icon name="plus" className="chev" />
       </div>}
       {f.slice(0, shown).map(e => <div key={e.id} className="item" onClick={() => onPick(e)}>
-        <Thumb ex={e} /><div className="grow"><div className="tt capitalize">{e.n}</div><div className="ss capitalize">{t(e.tg || e.bp)} · {t(e.eq)}</div></div>
+        <Thumb ex={e} /><div className="grow"><div className="tt capitalize">{exName(e, getLang())}</div><div className="ss capitalize">{t(e.tg || e.bp)} · {t(e.eq)}</div></div>
         {usage[e.id] && <span className="tag acc"><Icon name="starFill" /></span>}<Icon name="plus" className="chev" />
       </div>)}
       {f.length === 0 && bp === '★' && <div className="empty">{t('Nothing chosen yet — add exercises and they’ll show up here.')}</div>}
@@ -589,7 +591,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     }
   }
   return <>
-    <h3 className="capitalize">{ex.n}</h3>
+    <h3 className="capitalize">{exName(ex, getLang())}</h3>
     <Media ex={{ ...ex, gif: mediaSrc(c) || ex.gif }} />
     <input ref={gifInput} type="file" accept="image/gif,video/mp4,.gif,.mp4" hidden onChange={e => { readExerciseMedia(e.target.files?.[0], onMediaPicked); e.target.value = '' }} />
     <div className="row" style={{ gap: 8, margin: '8px 0 12px' }}>
@@ -826,7 +828,7 @@ function WorkoutDetail({ w, close }) {
       const ex = EXIDX[e.id]
       return <div key={i} className="row" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
         {ex && <Thumb ex={ex} />}
-        <div className="grow"><div className="tt capitalize" style={{ fontWeight: 600 }}>{ex ? ex.n : (e.n || e.id)} {w.prs && w.prs.includes(e.id) && <span className="pr"><Icon name="trophy" />PR</span>}</div>
+        <div className="grow"><div className="tt capitalize" style={{ fontWeight: 600 }}>{ex ? exName(ex, getLang()) : (e.n || e.id)} {w.prs && w.prs.includes(e.id) && <span className="pr"><Icon name="trophy" />PR</span>}</div>
           <div className="ss">{e.sets.filter(s => s.done).map(s => setLabel(e.id, s, e.target)).join('  ·  ') || t('no sets')}</div></div>
       </div>
     })}
@@ -968,7 +970,7 @@ function TopWeight({ entryIdx, close }) {
     } else toast(t('Tracked — next time starts at {0}', fmtNum(S().exWeights[entry.id].w) + ' ' + st.unit))
   }
   return <>
-    <h3 className="capitalize row" style={{ gap: 8 }}><Icon name="checkCircle" style={{ color: 'var(--acc)' }} />{t('{0} done', ex.n)}</h3>
+    <h3 className="capitalize row" style={{ gap: 8 }}><Icon name="checkCircle" style={{ color: 'var(--acc)' }} />{t('{0} done', exName(ex, getLang()))}</h3>
     <div className="muted small">{t('Confirm the weight you worked with — your highest becomes the default next time.')}{!unitDone && unit.length > 1 ? ' ' + t('Then finish the superset partner.') : ''}</div>
     <WeightInput value={v} setValue={setV} unit={st.unit} />
     <div style={{ height: 10 }} />
@@ -1006,8 +1008,8 @@ function FinishSummary({ w, prs, e1prs = [], close }) {
       <div className="tile"><div className="l">{t('PRs')}</div><div className="v" style={{ fontSize: 20 }}>{prs.length || '—'}</div></div>
     </div>
     {(prs.length > 0 || e1prs.length > 0) && <div style={{ textAlign: 'left', marginBottom: 12 }}>
-      {prs.map(id => <div key={id} className="small accent capitalize row" style={{ gap: 5 }}><Icon name="trophy" style={{ fontSize: 13 }} />{t('New PR:')} {(EXIDX[id] || {}).n || id}</div>)}
-      {e1prs.map(p => <div key={p.id} className="small accent capitalize row" style={{ gap: 5 }}><Icon name="chartLine" style={{ fontSize: 13 }} />{t('Best estimated 1RM:')} {(EXIDX[p.id] || {}).n || p.id} · {fmtNum(p.est)} {st.unit}</div>)}
+      {prs.map(id => <div key={id} className="small accent capitalize row" style={{ gap: 5 }}><Icon name="trophy" style={{ fontSize: 13 }} />{t('New PR:')} {EXIDX[id] ? exName(EXIDX[id], getLang()) : id}</div>)}
+      {e1prs.map(p => <div key={p.id} className="small accent capitalize row" style={{ gap: 5 }}><Icon name="chartLine" style={{ fontSize: 13 }} />{t('Best estimated 1RM:')} {EXIDX[p.id] ? exName(EXIDX[p.id], getLang()) : p.id} · {fmtNum(p.est)} {st.unit}</div>)}
     </div>}
     <h4 className="sec" style={{ textAlign: 'left' }}>{t('What you just trained')}</h4>
     <BodyMap load={loadOfWorkouts([w])} body={st.body} />

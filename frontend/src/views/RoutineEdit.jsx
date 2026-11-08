@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { useStore } from '../store/useStore.js'
 import { exOr } from '../lib/exercises.js'
 import { uid } from '../lib/format.js'
-import { t } from '../lib/i18n.js'
+import { t, getLang } from '../lib/i18n.js'
 import { supersetUnits, cleanupSg, exLine } from '../lib/history.js'
 import { Thumb } from '../components/Media.jsx'
 import { glyphPicker, exercisePicker, exConfigSheet, confirmSheet } from '../sheets.jsx'
@@ -13,6 +13,7 @@ import { Button, SelectRow } from '../components/ui.jsx'
 import { POLICIES_FOR, POLICY_NAME, POLICY_DESC } from '../lib/progression.js'
 import BodyMap from '../components/BodyMap.jsx'
 import { loadOfRoutine, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
+import { exName } from '../lib/exnames.js'
 
 export default function RoutineEdit() {
   const nav = useNavigate()
@@ -31,7 +32,7 @@ export default function RoutineEdit() {
     <div className="card small muted">{t('This plan is read-only. Your coach can change the prescription. Log the sets you actually complete during your workout.')}</div>
     <div className="list">{r.ex.map((e, i) => {
       const ex = exOr(e.id)
-      return <div className="item" key={i}><Thumb ex={ex} /><div className="grow"><div className="tt capitalize">{ex.n}</div><div className="ss">{exLine(e, S.unit)}</div></div></div>
+      return <div className="item" key={i}><Thumb ex={ex} /><div className="grow"><div className="tt capitalize">{exName(ex, getLang())}</div><div className="ss">{exLine(e, S.unit)}</div></div></div>
     })}</div>
   </div>
 
@@ -79,7 +80,7 @@ export default function RoutineEdit() {
           exConfigSheet(ex, e, cfg => edit(x => { x[i] = { id: x[i].id, sg: x[i].sg, ...cfg } }), () => edit(x => { x.splice(i, 1); cleanupSg(x) }), r)
         }}>
           <Thumb ex={ex} />
-          <div className="grow"><div className="tt capitalize">{ex.n}</div><div className="ss">{exLine(e, S.unit)}</div></div>
+          <div className="grow"><div className="tt capitalize">{exName(ex, getLang())}</div><div className="ss">{exLine(e, S.unit)}</div></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 'none', alignItems: 'center' }}>
             {i > 0 && <button className={'iconbtn' + (linkedPrev ? ' on-ss' : '')} title={t('Superset with exercise above')} style={{ width: 32, height: 28, borderRadius: 8, fontSize: 15 }} onClick={ev => { ev.stopPropagation(); toggleLink(i) }}><Icon name="link" /></button>}
             <div style={{ display: 'flex', gap: 2 }}>

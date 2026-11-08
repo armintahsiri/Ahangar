@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore.js'
 import { EXIDX } from '../lib/exercises.js'
 import { lastBW, streakWeeks, setLabel, modeOf, effortOf, setsDone } from '../lib/history.js'
 import { fmtNum, fmtDate, fmtDur, todayISO, isoOf, weekKey, ltrNum } from '../lib/format.js'
-import { t, dateLocale } from '../lib/i18n.js'
+import { t, dateLocale, getLang } from '../lib/i18n.js'
 import { bwSheet, goalSheet, calendarSheet, workoutDetailSheet, WorkoutRow, bwDeltaColor } from '../sheets.jsx'
 import LineChart from '../components/LineChart.jsx'
 import Heatmap from '../components/Heatmap.jsx'
@@ -16,6 +16,7 @@ import {
   effortHistogram, HARD_RIR
 } from '../lib/effort.js'
 import { Button, Segmented, SelectRow } from '../components/ui.jsx'
+import { exName } from '../lib/exnames.js'
 
 // "This month" has to mean the month the dates are shown in. Workout days are stored as
 // ISO dates but rendered through the UI locale, which in Persian means Jalali months —
@@ -83,7 +84,7 @@ function PrCard({ S }) {
       · {month.length ? t('{0} new this month', fmtNum(month.length)) : t('nothing new this month')}</span></h2>
     {!month.length && <div className="small dim" style={{ marginBottom: 2 }}>{t('No new records this month — your latest:')}</div>}
     {show.slice(0, 6).map((r, i) => <div key={i} className="row between small" style={{ padding: '6px 0', borderBottom: 'var(--hair) solid var(--sep)' }}>
-      <span>{month.length > 0 && <Icon name="trophy" style={{ color: 'var(--yellow)', fontSize: 13, marginInlineEnd: 6 }} />}{EXIDX[r.id] ? EXIDX[r.id].n : t('Unknown exercise')}</span>
+      <span>{month.length > 0 && <Icon name="trophy" style={{ color: 'var(--yellow)', fontSize: 13, marginInlineEnd: 6 }} />}{EXIDX[r.id] ? exName(EXIDX[r.id], getLang()) : t('Unknown exercise')}</span>
       <span className="muted">{fmtNum(r.w) + ' ' + S.unit} · {fmtDate(r.d, true)}</span>
     </div>)}
   </div>
@@ -182,7 +183,7 @@ export default function Stats() {
   // number the grid of squares is actually about.
   const days12m = new Set(S.workouts.filter(w => w.d >= isoOf(new Date(now - 365 * 86400000))).map(w => w.d)).size
 
-  const exHist = [...new Set(S.workouts.flatMap(w => w.entries.map(e => e.id)))].filter(id => EXIDX[id]).sort((a, b) => EXIDX[a].n < EXIDX[b].n ? -1 : 1)
+  const exHist = [...new Set(S.workouts.flatMap(w => w.entries.map(e => e.id)))].filter(id => EXIDX[id]).sort((a, b) => exName(EXIDX[a], getLang()).localeCompare(exName(EXIDX[b], getLang()), getLang() === 'fa' ? 'fa' : 'en'))
   const curEx = exId && exHist.includes(exId) ? exId : exHist[0] || null
   // How this exercise was logged most recently decides what the curve means: top weight,
   // longest hold or top speed. Sets logged in another mode lack the field and score 0, so a
@@ -308,7 +309,7 @@ export default function Stats() {
         {exHist.length ? <>
           <div className="sect-b" style={{ marginBottom: 12 }}>
             <SelectRow title={t('Exercise')} sheetTitle={t('Exercise progress')} value={curEx} onChange={setExId}
-              options={exHist.map(id => ({ value: id, label: EXIDX[id].n }))} />
+              options={exHist.map(id => ({ value: id, label: exName(EXIDX[id], getLang()) }))} />
           </div>
           {lastP ? <>
             <h4 className="sec" style={{ margin: '2px 0 4px' }}>{t('Top set — then vs now')}</h4>
