@@ -350,13 +350,58 @@ function originAllowed(req) {
   try { return new URL(o).host === req.headers.host; }
   catch { return false; }
 }
-const authAttempts = new Map();
-function blockedAuth(key) {
-  const now = Date.now(), old = authAttempts.get(key);
-  if (!old || now - old.start > 15 * 60_000) { authAttempts.set(key, { start: now, count: 0 }); return false; }
-  return old.count >= 10;
+/* ---------- throttles ---------- */
+// TRUST_PROXY: how many trusted proxies sit in front of this API. With 0 (default) the
+// socket address IS the client IP and any X-Forwarded-For is ignored — a spoofed header can
+// neither dodge a bucket nor frame another client. With N, the client IP is the N-th address
+// from the RIGHT of XFF (the one your own proxy appended); anything further left is
+// client-controlled and never trusted.
+function clientIp(req) {
+  const n = Math.max(0, Math.trunc(+(process.env.TRUST_PROXY || 0)) || 0);
+  if (n > 0) {
+    const ips = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+    const pick = ips[ips.length - n];
+    if (pick) return pick;
+  }
+  return req.socket.remoteAddress || 'unknown';
 }
-function failAuth(key) { const a = authAttempts.get(key) || { start: Date.now(), count: 0 }; a.count++; authAttempts.set(key, a); }
+
+// Attempt buckets: { start, count, windowMs }. Pruned every 5 minutes and hard-capped, so an
+// attacker spraying random keys cannot grow the map without bound.
+const buckets = new Map();          // key -> { start, count, windowMs }
+const BUCKET_CAP = Math.max(1000, Math.trunc(+(process.env.BUCKET_CAP || 10000)) || 10000);
+function bucketBlocked(key, max, windowMs) {
+  const b = buckets.get(key);
+  return !!b && Date.now() - b.start <= windowMs && b.count >= max;
+}
+function bucketHit(key, windowMs) {
+  const now = Date.now();
+  const b = buckets.get(key);
+  if (!b || now - b.start > windowMs) buckets.set(key, { start: now, count: 1, windowMs });
+  else b.count++;
+  if (buckets.size > BUCKET_CAP) {
+    let drop = buckets.size - BUCKET_CAP;   // Map iterates in insertion order — oldest first
+    for (const k of buckets.keys()) { if (drop-- <= 0) break; buckets.delete(k); }
+  }
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, b] of buckets) if (now - b.start > b.windowMs) buckets.delete(k);
+}, 5 * 60_000).unref();
+export const _buckets = buckets;                                       // tests only
+export function _pruneBuckets(now = Date.now()) {                      // tests only
+  for (const [k, b] of buckets) if (now - b.start > b.windowMs) buckets.delete(k);
+  return buckets.size;
+}
+export function _bucketHit(key, windowMs) { bucketHit(key, windowMs) } // tests only
+
+// Limits. Everyone at one gym may sit behind one IP, so the per-IP register cap is modest
+// and every value is env-tunable; windows are the ones the UI messages quote.
+const LOGIN_WINDOW = 15 * 60_000, LOGIN_PHONE_MAX = 10;
+const LOGIN_IP_MAX = Math.max(1, Math.trunc(+(process.env.LOGIN_IP_MAX || 30)) || 30);
+const REGISTER_IP_MAX = Math.max(1, Math.trunc(+(process.env.REGISTER_IP_MAX || 10)) || 10);
+const CREDENTIALS_IP_MAX = Math.max(1, Math.trunc(+(process.env.CREDENTIALS_IP_MAX || 10)) || 10);
+const REGISTER_WINDOW = 60 * 60_000;
 
 /* ---------- live presence (in-memory) ---------- */
 // Clients heartbeat /api/activity while a workout is on screen; the admin dashboard reads who's
@@ -386,6 +431,9 @@ const routes = {
 
   'POST /api/register': async (req, res) => {
     const body = await readBody(req);
+    const regKey = `reg:${clientIp(req)}`;
+    if (bucketBlocked(regKey, REGISTER_IP_MAX, REGISTER_WINDOW)) return json(res, 429, { error: 'too many sign-up attempts — try again later' });
+    bucketHit(regKey, REGISTER_WINDOW);   // every attempt counts, so bulk sign-ups burn the budget
     const name = String(body.name || '').trim().slice(0, 40);
     if (!name) return json(res, 400, { error: 'name required' });
     const phone = normalizePhone(body.phone), password = String(body.password || '');
@@ -407,18 +455,24 @@ const routes = {
 
   'POST /api/login': async (req, res) => {
     const body = await readBody(req);
-    const phone = normalizePhone(body.phone), key = `${req.socket.remoteAddress || 'unknown'}:${phone || String(body.phone || '').slice(0, 40)}`;
-    if (blockedAuth(key)) return json(res, 429, { error: 'too many sign-in attempts — try again in 15 minutes' });
+    const phone = normalizePhone(body.phone);
+    const ip = clientIp(req);
+    const phoneKey = `login:${ip}:${phone || String(body.phone || '').slice(0, 40)}`;
+    const ipKey = `lip:${ip}`;
+    if (bucketBlocked(phoneKey, LOGIN_PHONE_MAX, LOGIN_WINDOW) || bucketBlocked(ipKey, LOGIN_IP_MAX, LOGIN_WINDOW))
+      return json(res, 429, { error: 'too many sign-in attempts — try again in 15 minutes' });
     const user = db.users.find(u => u.phone === phone);
     // one scrypt run either way — an unknown number burns the same time as a wrong password
     // (the verify deliberately runs even when the user is missing — no short-circuit)
     const record = (user && user.password) ? user.password : DUMMY_PASSWORD;
     const ok = verifyPassword(String(body.password || ''), record);
     if (!user || !ok) {
-      failAuth(key); return json(res, 401, { error: 'mobile number or password is incorrect' });
+      bucketHit(phoneKey, LOGIN_WINDOW);   // only failures count against the caps
+      bucketHit(ipKey, LOGIN_WINDOW);
+      return json(res, 401, { error: 'mobile number or password is incorrect' });
     }
     if (user.disabled) return json(res, 403, { error: 'this account has been disabled' });
-    authAttempts.delete(key);
+    buckets.delete(phoneKey);
     json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
   },
 
@@ -426,6 +480,9 @@ const routes = {
   'POST /api/account/credentials': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
+    const credKey = `cred:${clientIp(req)}`;
+    if (bucketBlocked(credKey, CREDENTIALS_IP_MAX, REGISTER_WINDOW)) return json(res, 429, { error: 'too many attempts — try again later' });
+    bucketHit(credKey, REGISTER_WINDOW);
     const body = await readBody(req), phone = normalizePhone(body.phone), password = String(body.password || '');
     if (!phone) return json(res, 400, { error: 'enter a valid mobile number, including country code' });
     if (password.length < 8 || password.length > 200) return json(res, 400, { error: 'password must be at least 8 characters' });

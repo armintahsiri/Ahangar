@@ -33,9 +33,13 @@ function seedDb(dir) {
 seedDb(TMP)
 process.env.DATA_DIR = TMP
 process.env.ADMIN_UIDS = 'u-admin,u-admin2'
+// the shared in-process server does dozens of registrations/logins from 127.0.0.1 — lift the
+// per-IP caps here; the throttle suites use spawned children with their own tight caps
+process.env.REGISTER_IP_MAX = '1000'
+process.env.LOGIN_IP_MAX = '1000'
 // INVITE_ONLY stays off for the shared in-process server; the invite suite spawns its own child.
 
-const { createServer, reminderDue, _setPasswordVerifier, passwordMatches } = await import('./server.js')
+const { createServer, reminderDue, _setPasswordVerifier, passwordMatches, _buckets, _pruneBuckets, _bucketHit } = await import('./server.js')
 const server = createServer()
 await new Promise(resolve => server.listen(0, resolve))
 const BASE = `http://127.0.0.1:${server.address().port}`
@@ -386,6 +390,95 @@ test('login.timing: unknown phone runs the same one scrypt verification as a wro
   } finally {
     _setPasswordVerifier() // restore the real verifier for the remaining suites
   }
+})
+
+/* ---------- throttles: proxy-aware client IP, per-IP caps, prune, size cap ---------- */
+// Runs against spawned children so the TRUST_PROXY / cap envs are isolated from the shared
+// in-process server (whose buckets would otherwise be polluted for the other suites).
+async function spawnWith(env) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-throttle-'))
+  seedDb(dir)
+  const child = spawn(process.execPath, [path.join(HERE, 'server.js')], {
+    cwd: HERE,
+    env: { ...process.env, DATA_DIR: dir, PORT: '0', ...env },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  const port = await new Promise((resolve, reject) => {
+    let buf = ''
+    child.stdout.on('data', d => { buf += d; const m = buf.match(/gym-api on :(\d+)/); if (m) resolve(+m[1]) })
+    child.stderr.on('data', d => { buf += d })
+    child.on('exit', code => reject(new Error(`server exited early: ${code}\n${buf}`)))
+  })
+  return {
+    child, dir, B: `http://127.0.0.1:${port}`,
+    c: async (method, url, opt = {}) => {
+      const res = await fetch(`http://127.0.0.1:${port}${url}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...(opt.headers || {}), ...(opt.token ? { cookie: `gymsid=${opt.token}` } : {}) },
+        body: opt.body === undefined ? undefined : JSON.stringify(opt.body)
+      })
+      const json = await res.json().catch(() => null)
+      return { status: res.status, json, token: (res.headers.get('set-cookie') || '').match(/gymsid=([^;]*)/)?.[1] || null }
+    },
+    cleanup: () => { child.kill('SIGTERM'); try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* fine */ } }
+  }
+}
+
+test('throttle.trust-proxy: with TRUST_PROXY=1 the rightmost XFF entry is the client, spoofed entries are ignored', { timeout: 30000 }, async () => {
+  const s = await spawnWith({ TRUST_PROXY: '1', LOGIN_IP_MAX: '3', REGISTER_IP_MAX: '2' })
+  try {
+    // one trusted hop: the rightmost XFF entry is the real client (the proxy appended it);
+    // anything to its left is client-controlled and never looked at
+    const viaA = { 'x-forwarded-for': '203.0.113.7' }
+    const viaB = { 'x-forwarded-for': '203.0.113.9' }
+    // register cap: 10/h default is lowered to 2 — both attempts from IP 203.0.113.7 burn it
+    const r1 = await s.c('POST', '/api/register', { headers: viaA, body: { name: 'A One', phone: nextPhone(), password: 'password123' } })
+    assert.equal(r1.status, 200)
+    assert.equal((await s.c('POST', '/api/register', { headers: viaA, body: { name: 'A Two', phone: nextPhone(), password: 'password123' } })).status, 200)
+    assert.equal((await s.c('POST', '/api/register', { headers: viaA, body: { name: 'A Three', phone: nextPhone(), password: 'password123' } })).status, 429)
+    // a different real client IP has its own register budget
+    assert.equal((await s.c('POST', '/api/register', { headers: viaB, body: { name: 'B One', phone: nextPhone(), password: 'password123' } })).status, 200)
+    // per-IP failed-login cap (3): three wrong passwords from 203.0.113.7 close the tap
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await s.c('POST', '/api/login', { headers: viaA, body: { phone: '+989130000001', password: `nope-${i}` } })).status, 401)
+    }
+    assert.equal((await s.c('POST', '/api/login', { headers: viaA, body: { phone: '+989130000001', password: 'nope-4' } })).status, 429)
+    // and the spoofed leftmost entry cannot open a fresh bucket for the same real client
+    assert.equal((await s.c('POST', '/api/login', { headers: { 'x-forwarded-for': `9.9.9.9, 203.0.113.7` }, body: { phone: '+989130000001', password: 'nope-5' } })).status, 429)
+    // while the other real IP is untouched
+    assert.equal((await s.c('POST', '/api/login', { headers: viaB, body: { phone: '+989130000003', password: 'nope' } })).status, 401)
+  } finally { s.cleanup() }
+})
+
+test('throttle.no-proxy: with TRUST_PROXY=0 a spoofed X-Forwarded-For is ignored entirely', { timeout: 30000 }, async () => {
+  const s = await spawnWith({ TRUST_PROXY: '0', LOGIN_IP_MAX: '2' })
+  try {
+    // both fake addresses land in the same bucket — the socket IP (127.0.0.1)
+    assert.equal((await s.c('POST', '/api/login', { headers: { 'x-forwarded-for': '8.8.8.8' }, body: { phone: '+989130000001', password: 'nope' } })).status, 401)
+    assert.equal((await s.c('POST', '/api/login', { headers: { 'x-forwarded-for': '8.8.8.8' }, body: { phone: '+989130000002', password: 'nope' } })).status, 401)
+    // cap hit on the real IP…
+    assert.equal((await s.c('POST', '/api/login', { headers: { 'x-forwarded-for': '8.8.8.8' }, body: { phone: '+989130000003', password: 'nope' } })).status, 429)
+    // …and a *different* fake XFF does not dodge it — proof the header was never read
+    assert.equal((await s.c('POST', '/api/login', { headers: { 'x-forwarded-for': '7.7.7.7' }, body: { phone: '+989130000004', password: 'nope' } })).status, 429)
+  } finally { s.cleanup() }
+})
+
+test('throttle.prune drops expired buckets and the map is size-capped', () => {
+  _buckets.clear()
+  const old = { start: Date.now() - 10 * 60_000, count: 5, windowMs: 60_000 }
+  _buckets.set('expired', old)
+  _buckets.set('fresh', { start: Date.now(), count: 1, windowMs: 60_000 })
+  const size = _pruneBuckets()
+  assert.equal(_buckets.has('expired'), false)
+  assert.equal(_buckets.has('fresh'), true)
+  assert.equal(size, 1)
+  // size cap: one more hit over the cap evicts the oldest entries
+  const cap = Math.max(1000, Math.trunc(+(process.env.BUCKET_CAP || 10000)) || 10000)
+  for (let i = 0; i < cap; i++) _buckets.set(`filler-${i}`, { start: Date.now(), count: 1, windowMs: 60_000 })
+  _bucketHit('the-drop', 60_000)
+  assert.ok(_buckets.size <= cap, `bucket size ${_buckets.size} exceeds cap ${cap}`)
+  assert.equal(_buckets.has('the-drop'), true)
+  _buckets.clear()
 })
 
 /* ---------- sync versioning (rev / baseRev) ---------- */

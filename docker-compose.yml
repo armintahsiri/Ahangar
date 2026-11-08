@@ -31,6 +31,9 @@ services:
     environment:
       - PORT=3000            # internal port (nginx proxies here) — do not change
       - DATA_DIR=/data
+      # the API port is not published to the host — the only thing in front of it is the
+      # compose nginx, so exactly one hop of X-Forwarded-For is trusted
+      - TRUST_PROXY=1
     volumes:
       - ./data:/data         # accounts, per-user state, session secret — BACK THIS UP
 
