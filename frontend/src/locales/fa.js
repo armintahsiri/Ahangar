@@ -468,5 +468,14 @@ export default {
   "{0} unused · {1} redeemed": "{0} بلااستفاده · {1} مصرف‌شده",
   "Copied {0}": "{0} کپی شد", "used": "مصرف‌شده",
   "no coach": "بدون مربی",
-  "No codes yet — generate one to invite someone.": "هنوز کدی نیست — برای دعوت دیگران یکی بسازید."
+  "No codes yet — generate one to invite someone.": "هنوز کدی نیست — برای دعوت دیگران یکی بسازید.",
+
+  // --- وضعیت همگام‌سازی ---
+  "Sync status": "وضعیت همگام‌سازی",
+  "Synced": "همگام شد", "Synced · {0}": "همگام شد · {0}",
+  "Waiting to sync…": "در انتظار همگام‌سازی…",
+  "Sync failed": "همگام‌سازی ناموفق",
+  "Sync failed — your data is safe on this device and will sync later.": "همگام‌سازی ناموفق — داده‌های شما روی همین دستگاه امن است و بعداً همگام می‌شود.",
+  "Device storage is full — changes may not persist. Export a backup and free up space.": "حافظهٔ دستگاه پر است — ممکن است تغییرات ذخیره نشوند. پشتیبان بگیرید و فضا آزاد کنید.",
+  "Not synced yet": "هنوز همگام نشده"
 }

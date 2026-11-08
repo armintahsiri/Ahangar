@@ -7,7 +7,8 @@ import { effortOf } from '../lib/history.js'
 import { IS_ANDROID } from '../lib/api.js'
 import { pushSupported, enablePush, disablePush, sendTestPush } from '../lib/push.js'
 import { wakeLockSupported } from '../lib/wakelock.js'
-import { t, LANGS, INSTR_LANGS } from '../lib/i18n.js'
+import { t, LANGS, INSTR_LANGS, dateLocale } from '../lib/i18n.js'
+import { describeSync } from '../lib/sync-status.js'
 import { DEMO, REPO } from '../lib/demo.js'
 import { MOBILE, shareExport, syncReminder } from '../lib/mobile.js'
 import { loadStarterPlan, confirmSheet, importFromApp } from '../sheets.jsx'
@@ -18,6 +19,8 @@ export default function Settings() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
   const user = useStore(s => s.user)
+  const sync = useStore(s => s.sync)
+  const storageError = useStore(s => s.storageError)
   const { update, replaceState, signOut, signOutAll, resetDemo, loadSampleData } = useStore()
   const toast = useUI(s => s.toast)
   const fileRef = useRef(null)
@@ -82,6 +85,12 @@ export default function Settings() {
       </> : user ? <>
         <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={user.phone} />
         {S.coachProgram && <Row icon="person" iconTint="var(--acc)" title={t('My coach')} subtitle={t('Assigned by {0}. Your program is on the Plan tab.', S.coachProgram.coach?.name || t('your coach'))} accessory="chevron" onClick={() => nav('/plan')} />}
+        {(() => {
+          // one quiet line answering "is this device what the server has?" — it earns its
+          // place only by saying something, so a healthy sync shows the last success time.
+          const d = describeSync(sync, storageError, t, at => new Date(at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' }))
+          return <Row icon={d.icon} iconTint={d.tone === 'error' ? 'var(--red)' : d.tone === 'pending' ? 'var(--orange)' : 'var(--green)'} title={t('Sync status')} subtitle={d.text} />
+        })()}
         {(user.admin || user.role === 'coach') && <Row icon="person" iconTint="var(--acc)" title={t('Coach dashboard')} accessory="chevron" onClick={() => nav('/coach')} />}
         {user.admin && <Row icon="wrench" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}
         <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={() => confirmSheet({ title: t('Sign out?'), message: t('Your data is synced to your profile first, then cleared from this device.'), confirmText: t('Sign out'), danger: true, onConfirm: () => { signOut(); nav('/home') } })} />

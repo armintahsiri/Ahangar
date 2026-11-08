@@ -4,6 +4,7 @@ import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
+import { nextSync } from '../lib/sync-status.js'
 
 const KEY = 'gym_state_v1'
 export const DEF = {
@@ -87,8 +88,13 @@ export const useStore = create((set, get) => {
   const persist = (S, push = true) => {
     S._ts = Date.now()
     registerCustom(S.customEx)
-    localStorage.setItem(KEY, JSON.stringify(S))
-    set({ S })
+    // QuotaExceeded must never take the calling handler down: the change stays in memory,
+    // storageError flags it for the UI, and the next successful write clears the flag.
+    let storageError = false
+    try { localStorage.setItem(KEY, JSON.stringify(S)) }
+    catch (e) { storageError = true; console.warn('openGym: could not write local state', e) }
+    const sync = push && get().user ? nextSync(get().sync, { type: 'edit' }) : get().sync
+    set({ S, storageError, sync })
     if (MOBILE) nativePersist()
     if (push && get().user) {
       clearTimeout(pushTm)
@@ -120,6 +126,7 @@ export const useStore = create((set, get) => {
     localStorage.removeItem('gym_guest')
     localStorage.removeItem('gym_dirty')
     localStorage.removeItem(KEY)
+    set({ sync: nextSync(null, { type: 'reset' }), storageError: false })
     persist(clone(DEF), false)
   }
 
@@ -128,6 +135,10 @@ export const useStore = create((set, get) => {
     user: (() => { try { return JSON.parse(localStorage.getItem('gym_user')) || null } catch { return null } })(),
     clubName: 'openGym',
     ready: false,
+    // sync lives outside S on purpose — it is this device's connection state, never user
+    // data, so it is neither persisted locally nor pushed to the server.
+    sync: { status: 'idle', at: null },
+    storageError: false,
 
     // Mutate a draft of S via producer fn, then persist + schedule sync.
     update(mut, push = true) {
@@ -149,8 +160,9 @@ export const useStore = create((set, get) => {
     async pushState() {
       if (!get().user) return
       clearTimeout(pushTm)
-      try { await api('/api/data', { method: 'PUT', body: JSON.stringify({ state: get().S }) }); localStorage.removeItem('gym_dirty') }
-      catch (e) { localStorage.setItem('gym_dirty', '1') }
+      set({ sync: nextSync(get().sync, { type: 'send' }) })
+      try { await api('/api/data', { method: 'PUT', body: JSON.stringify({ state: get().S }) }); localStorage.removeItem('gym_dirty'); set({ sync: nextSync(get().sync, { type: 'success', at: Date.now() }) }) }
+      catch (e) { localStorage.setItem('gym_dirty', '1'); set({ sync: nextSync(get().sync, { type: 'failure', at: Date.now() }) }) }
     },
     async pullState() {
       try {
@@ -162,6 +174,7 @@ export const useStore = create((set, get) => {
           const next = withCoachProgram(Object.assign(clone(DEF), state), state)
           if (active) next.active = active
           persist(next, false)
+          set({ sync: nextSync(get().sync, { type: 'pull', at: Date.now() }) })
         } else if (hasData(S)) {
           persist(withCoachProgram(S, state), false)
           await get().pushState()
@@ -250,7 +263,10 @@ export const useStore = create((set, get) => {
           get().update(s => { s.reminder = { ...s.reminder, tz } })
         }
       } catch (e) {
-        if (e.status === 401) get().setUser(null)
+        if (e.status === 401) {
+          get().setUser(null)
+          set({ sync: nextSync(null, { type: 'reset' }) })
+        }
       }
       const current = clone(get().S)
       if (clearLegacySampleReschedule(current)) get().replaceState(current, true)

@@ -18,6 +18,7 @@ export default function Home() {
   const S = useStore(s => s.S)
   const clubName = useStore(s => s.clubName)
   const user = useStore(s => s.user)
+  const syncFailed = useStore(s => s.sync?.status === 'failed')
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedISO, setSelectedISO] = useState(() => todayISO())
 
@@ -79,7 +80,10 @@ export default function Home() {
   return <div className="narrow">
     <div className="hdr">
       <div><h1>{user ? t('Hi {0}', user.name) : clubName}</h1><div className="sub">{today.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}</div></div>
-      <button className="iconbtn" onClick={() => nav('/settings')} aria-label={t('Settings')}><Icon name="gear" /></button>
+      <div className="row" style={{ gap: 4 }}>
+        {syncFailed && <button className="iconbtn" style={{ color: 'var(--red)' }} aria-label={t('Sync failed')} title={t('Sync failed')} onClick={() => nav('/settings')}><Icon name="xmark" /></button>}
+        <button className="iconbtn" onClick={() => nav('/settings')} aria-label={t('Settings')}><Icon name="gear" /></button>
+      </div>
     </div>
 
     <div className="card">

@@ -3,7 +3,12 @@ export const IS_APPLE = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)
 export const IS_ANDROID = /Android/.test(navigator.userAgent)
 
 export async function api(path, opts) {
-  const r = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts))
+  const o = Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts)
+  // A state PUT fired by the tab-close flush has to survive unload: keepalive does that,
+  // but only for small bodies (the browser caps keepalive at 64 KB) — bigger syncs stay
+  // on the normal path and wait for the next debounce.
+  if (o.method === 'PUT' && path === '/api/data' && typeof o.body === 'string' && o.body.length < 60 * 1024) o.keepalive = true
+  const r = await fetch(path, o)
   const data = await r.json().catch(() => ({}))
   if (!r.ok) { const e = new Error(data.error || ('HTTP ' + r.status)); e.status = r.status; throw e }
   return data
