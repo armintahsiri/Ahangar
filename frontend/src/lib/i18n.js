@@ -10,7 +10,10 @@ import { useSyncExternalStore } from 'react'
 // UI languages. A language without an instruction pack falls back to English instructions.
 export const LANGS = { en: 'English', fa: 'فارسی' }
 export const INSTR_LANGS = ['en']
-const DATE_LOCALES = { en: 'en-GB', fa: 'fa-IR' }
+// Dates keep the language's calendar and month names (fa-IR → Persian calendar), but the
+// digit system is pinned to Latin (`-u-nu-latn`): a date renders "9 آبان", not "۹ آبان" —
+// the same digit style the rest of the UI renders numbers in.
+const DATE_LOCALES = { en: 'en-GB', fa: 'fa-IR-u-nu-latn' }
 
 export const directionFor = l => l === 'fa' ? 'rtl' : 'ltr'
 

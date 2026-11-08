@@ -22,13 +22,21 @@ export function fmtDur(ms) {
 }
 // Imported history has no clock — an unknown duration is left out rather than shown as "0 min".
 export const durPart = ms => (ms >= 60000 ? [fmtDur(ms)] : [])
-// Numbers follow the UI language, like the dates above — a hardcoded locale put Swiss
-// apostrophes ("7'535 kg") in front of every user, in every language.
-export const fmtNum = n => (Math.round(n * 10) / 10).toLocaleString(dateLocale())
+// Numbers are Latin digits in every language — both on purpose: they are data, and mixed
+// prose (Persian sentence, Latin figure) is how gym apps read. The old per-language locale
+// rendered Persian digits + ٫ decimal, which iOS Safari then compounded by re-shaping whole
+// tile values; a fixed en-US keeps one digit style everywhere (decimal point, comma group).
+export const fmtNum = n => (Math.round(n * 10) / 10).toLocaleString('en-US')
 // Volume stays in the profile's unit throughout: the old shorthand turned anything over
 // 10 000 into "t", which is wrong for a pound profile and made one list mix "18.8t" with
 // "7'535 kg" — two numbers you can't compare at a glance.
 export const fmtVol = (v, unit) => fmtNum(v) + ' ' + unit
+// Wrap an already-formatted number in an LTR isolate (U+2066…U+2069). In an RTL paragraph
+// a leading minus is a neutral between two runs and drifts to the far side of its figure —
+// "-1.5" renders as "1.5-". The isolate pins sign and digits together; positives render
+// exactly as before, so callers can wrap unconditionally. The unit stays outside: RTL
+// prose keeps flowing around it the way it always has.
+export const ltrNum = s => '\u2066' + s + '\u2069'
 // Plural forms are not automatic when the English string is the key.
 export const exCount = n => t(n === 1 ? '{0} exercise' : '{0} exercises', n)
 

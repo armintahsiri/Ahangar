@@ -121,6 +121,11 @@ body{
   touch-action:manipulation;
   font-variant-numeric:tabular-nums;
 }
+/* WebKit (Safari on iPhone, in particular) re-shapes ASCII digits into Persian forms when
+   the page language is fa — SF's `locl` feature keys off <html lang>. The app renders its
+   own digits and wants them Latin in both languages, so switch that localization off;
+   without it a Persian phone turns even a plain "36" into "۳۶". */
+html[lang="fa"] body{ font-feature-settings:'locl' 0; }
 button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;letter-spacing:inherit}
 input,select,textarea{font:inherit;color:var(--label);letter-spacing:inherit}
 img{max-width:100%}
@@ -814,6 +819,24 @@ h4.sec{
 .mchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
 .mchip{font-size:12px;padding:4px 9px;border-radius:99px;background:var(--surface-2);color:var(--label-2)}
 .mchip.miss{background:color-mix(in srgb,var(--orange) 16%,transparent);color:var(--orange)}
+
+/* --- plain-language opener (stats) — one sentence per question, icon-led --- */
+.sumrow{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:15px;line-height:1.35}
+.sumrow+.sumrow{border-top:var(--hair) solid var(--sep)}
+.sumrow .icn{color:var(--label-2);flex:none}
+
+/* --- fold: the opt-in detail layer. Charts and coach vocabulary go here so the
+   default reader gets the answer in sentences and the analysis stays one tap away. --- */
+.fold{margin-top:10px}
+.fold>summary{
+  list-style:none;cursor:pointer;user-select:none;
+  display:flex;align-items:center;gap:6px;
+  color:var(--label-2);font-size:13px;padding:8px 0;
+}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary:active{opacity:.7}
+.fold>summary .chev{transition:transform .2s}
+.fold[open]>summary .chev{transform:rotate(180deg)}
 
 /* --- stat tiles --- */
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
