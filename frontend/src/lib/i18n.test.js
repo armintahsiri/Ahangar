@@ -22,7 +22,8 @@ describe('Persian locale', () => {
     await setLang('fa')
 
     expect(getLang()).toBe('fa')
-    expect(dateLocale()).toBe('fa-IR')
+    // dates use the Persian calendar but keep Latin digits (see DATE_LOCALES in i18n.js)
+    expect(dateLocale()).toBe('fa-IR-u-nu-latn')
     expect(directionFor(getLang())).toBe('rtl')
     expect(t('Settings')).toBe('تنظیمات')
   })
