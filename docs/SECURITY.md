@@ -56,14 +56,37 @@ self-contained base64 inside the states — run `scripts/inline-media.mjs` (dry 
 `--apply`; bumps each state's `rev` so clients pull the inlined copy). Stop the API before
 running either tool with `--apply`.
 
-## 4. Rest-timer notifications live in memory
+## 5. Rest-timer notifications live in memory
 
 The "rest over" push is scheduled in the API's memory (`POST /api/push/rest-timer`) and
 cancelled by the client when you're back on screen. If the API restarts while a rest timer is
 running, that one alert is silently gone — everything else (workout-day reminders, subscriptions)
 is persisted in `db.json` and survives restarts.
 
-## 5. Environment knobs that matter
+## 6. Content-Security-Policy: from Report-Only to enforcing
+
+`web/security-headers.conf` ships two headers: the enforcing CSP (safe-start: `frame-ancestors`,
+`object-src`, `base-uri`, `form-action`) and a full **`Content-Security-Policy-Report-Only`**
+policy that logs violations without blocking anything. To evaluate it:
+
+1. Deploy, then open with DevTools → Console (keep "Selected context" on the top frame):
+   the login screen, Home, an **active workout playing a custom GIF/MP4**, Plan → print/PDF
+   (the `plan-share` iframe), Stats, Settings, Admin and Coach dashboards.
+2. Violations appear as `Report Content-Security-Policy` warnings naming the directive and the
+   blocked URL. There is no report endpoint on purpose — nothing leaves the browser.
+3. When several real sessions come back clean, move the policy into the enforcing
+   `Content-Security-Policy` header (replace its value) and delete the Report-Only line.
+
+Likely suspects if something is reported: the `plan-share.js` print path writes a full document
+into an `about:blank` iframe (`frame-src 'self' about:` and `style-src 'unsafe-inline'` cover
+it — its inline `<style>` must not trip `style-src`); any future inline `<script>` or
+`on…=` handler would trip `script-src 'self'` (today's build has none — verified by grep over
+`dist/`); personal media is same-origin (`/api/media/…`) so `img-src`/`media-src` only need
+`data:` and `blob:` for legacy inline copies and possible future upload previews; the dataset
+CDN used by the mobile build (`cdn.jsdelivr.net`) would need an explicit `img-src` entry if that
+build ever ran behind this header.
+
+## 7. Environment knobs that matter
 
 | Variable | Effect |
 |---|---|
@@ -72,7 +95,7 @@ is persisted in `db.json` and survives restarts.
 | `TRUST_PROXY` | how many proxy hops are trusted for client-IP throttling (compose sets 1) |
 | `LOGIN_IP_MAX` / `REGISTER_IP_MAX` / `CREDENTIALS_IP_MAX` | per-IP throttle ceilings |
 
-## 6. Reporting
+## 8. Reporting
 
 Please report vulnerabilities privately via the repository's security advisory feature rather
 than a public issue — see SECURITY policy at the repository root.
