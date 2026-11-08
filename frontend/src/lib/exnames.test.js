@@ -42,7 +42,7 @@ describe('exName with the lazy pack', () => {
   })
   it('never throws for missing or null inputs', () => {
     expect(exName(null, 'fa')).toBe('')
-    expect(exName({ id: '0025' }, 'fa')).toBe('')
+    expect(exName({ id: 'ffff' }, 'fa')).toBe('')  // an id the pack does not cover
   })
 })
 
@@ -72,5 +72,41 @@ describe('nameMatches / matchEx', () => {
   it('normalizes the query (ZWNJ, digits) before matching', async () => {
     await loadExNames('fa')
     expect(matchEx(ex, '  BENCH   ')).toBe(true)
+  })
+})
+
+import pack from '../locales/exnames.fa.js'
+import { EXDB } from './exercises-data.js'
+
+describe('exnames.fa.js data integrity', () => {
+  const EXIDX = new Map(EXDB.map(e => [e.id, e]))
+  const ids = Object.keys(pack)
+  it('every id exists in the dataset and none is duplicated', () => {
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const id of ids) expect(EXIDX.has(id), `unknown dataset id ${id}`).toBe(true)
+  })
+  it('names and aliases are non-empty, trimmed strings', () => {
+    for (const [id, e] of Object.entries(pack)) {
+      expect(typeof e.n).toBe('string')
+      expect(e.n.trim(), id).not.toBe('')
+      expect(e.n, id).toBe(e.n.trim())
+      for (const a of e.a || []) {
+        expect(typeof a).toBe('string')
+        expect(a.trim(), `${id} alias`).not.toBe('')
+        expect(a, `${id} alias`).toBe(a.trim())
+      }
+    }
+  })
+  it('no Persian name contains digits or Arabic yeh/kaf', () => {
+    for (const [id, e] of Object.entries(pack)) {
+      expect(e.n, id).not.toMatch(/[0-9۰-۹٠-٩]/)
+      expect(e.n, id).not.toMatch(/[يك]/)
+      expect(e.n.length, id).toBeLessThan(60)
+    }
+  })
+  it('the starter-plan exercises are fully covered', () => {
+    for (const id of ['0025', '0047', '0426', '0334', '0241', '0251', '2330', '0027', '1323', '0031', '0313', '0043', '0085', '0739', '0585', '0586', '0605']) {
+      expect(pack[id], `starter exercise ${id} uncovered`).toBeTruthy()
+    }
   })
 })
