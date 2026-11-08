@@ -129,7 +129,27 @@ booking, or membership-system integrations. The admin account can still inspect 
 so use it only for trusted club operators and explain that access to members. Exercise media has
 separate upstream terms; review them before offering a commercial deployment.
 
-## 6. Backups
+## 6. TRUST_PROXY — how many proxies are in front of the API?
+
+The API throttles logins, signups and media uploads **per client IP**. Behind proxies it learns
+the real client IP from `X-Forwarded-For`, trusting only the last `TRUST_PROXY` entries (each
+proxy appends one). Set it to the number of hops you actually run:
+
+| Topology | Value |
+|---|---|
+| Compose as shipped — only its own nginx in front of the API | `1` (docker-compose sets this for you) |
+| Your own TLS terminator added in front of the compose nginx | `2` |
+| Cloudflare (or another CDN) on top of that | `3` |
+
+Too low: a spoofed `X-Forwarded-For` can evade per-IP throttling. Too high: the API trusts
+client-controlled entries, and **every member can end up sharing one IP bucket** — the per-IP
+caps then throttle the whole gym together. The API logs the effective value at boot and prints
+the resolved client IP the first time a per-IP limit fires, so a wrong chain shows up in
+`docker compose logs api` immediately. Personal media adds two more env knobs:
+`MEDIA_MAX_FILES` / `MEDIA_MAX_BYTES` (per-profile quota, 40 files / 30 MB) and
+`MEDIA_UPLOAD_IP_MAX` (uploads per IP per hour); see `docs/SECURITY.md` for the media model.
+
+## 7. Backups
 
 Everything is in `./data`:
 
@@ -140,7 +160,7 @@ tar czf opengym-backup-$(date +%F).tar.gz data/
 That archive contains all profiles, password hashes and workout history. Restore by unpacking it back
 into the project folder. (Individual users can also export their own data as JSON from Settings.)
 
-## 6. Notifications
+## 8. Notifications
 
 openGym can push two kinds of alert to your phone/desktop, even when the app isn't open:
 rest-timer-over, and a reminder on days you have a workout planned but haven't logged one yet.
@@ -157,7 +177,7 @@ Wake Lock API is only available over HTTPS or on `http://localhost`, so on a pla
 instance the switch shows as unsupported. Nothing to configure server-side either way, and iOS
 refuses the lock while the phone is in Low Power Mode.
 
-## 7. HSTS (Strict Transport Security)
+## 9. HSTS (Strict Transport Security)
 
 openGym's nginx deliberately does **not** send `Strict-Transport-Security`: when TLS terminates
 outside the container (Cloudflare Tunnel, Caddy, Traefik, a load balancer), the header belongs on
@@ -177,7 +197,7 @@ header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 Start with a short `max-age` (e.g. `86400`) until every subdomain is confirmed to work over
 HTTPS — HSTS is sticky in browsers and hard to walk back.
 
-## 8. Updating
+## 10. Updating
 
 Build the current fork from source:
 
