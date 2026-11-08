@@ -10,7 +10,7 @@ export async function api(path, opts) {
   if (o.method === 'PUT' && path === '/api/data' && typeof o.body === 'string' && o.body.length < 60 * 1024) o.keepalive = true
   const r = await fetch(path, o)
   const data = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(data.error || ('HTTP ' + r.status)); e.status = r.status; throw e }
+  if (!r.ok) { const e = new Error(data.error || ('HTTP ' + r.status)); e.status = r.status; e.data = data; throw e }
   return data
 }
 

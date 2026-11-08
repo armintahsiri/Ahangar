@@ -477,5 +477,26 @@ export default {
   "Sync failed": "همگام‌سازی ناموفق",
   "Sync failed — your data is safe on this device and will sync later.": "همگام‌سازی ناموفق — داده‌های شما روی همین دستگاه امن است و بعداً همگام می‌شود.",
   "Device storage is full — changes may not persist. Export a backup and free up space.": "حافظهٔ دستگاه پر است — ممکن است تغییرات ذخیره نشوند. پشتیبان بگیرید و فضا آزاد کنید.",
-  "Not synced yet": "هنوز همگام نشده"
+  "Not synced yet": "هنوز همگام نشده",
+
+  // --- تعارض همگام‌سازی ---
+  "Sync conflict": "تعارض همگام‌سازی",
+  "Sync conflict — choose which version to keep.": "تعارض همگام‌سازی — انتخاب کنید کدام نسخه بماند.",
+  "This device and the server hold two different versions of your data — one side replaced everything. Pick which one to keep; the other is backed up on this device.": "این دستگاه و سرور دو نسخهٔ متفاوت از داده‌های شما دارند — یک طرف همه‌چیز را جایگزین کرده است. انتخاب کنید کدام بماند؛ نسخهٔ دیگر روی همین دستگاه پشتیبان می‌شود.",
+  "Both this device and the server changed:": "هم این دستگاه و هم سرور این بخش‌ها را تغییر داده‌اند:",
+  "Pick which version to keep — workouts and weigh-ins are combined either way. The other version is backed up on this device.": "انتخاب کنید کدام نسخه بماند — تمرین‌ها و وزن‌کشی‌ها به هر حال با هم ترکیب می‌شوند. نسخهٔ دیگر روی همین دستگاه پشتیبان می‌شود.",
+  "Keep my version": "نسخهٔ من بماند",
+  "Use the server version": "نسخهٔ سرور اعمال شود",
+  "Decide later": "بعداً تصمیم می‌گیرم",
+  "Discarded version": "نسخهٔ کنارگذاشته",
+  "Restore last discarded version": "بازگردانی آخرین نسخهٔ کنارگذاشته",
+  "Restore the data that was set aside when the last sync conflict was resolved?": "داده‌هایی که آخرین بار هنگام حل تعارض همگام‌سازی کنار گذاشته شد، بازگردانده شود؟",
+  "Version restored": "نسخه بازگردانی شد",
+  "Discarded {0}": "کنارگذاشته در {0}",
+  "Saved when the last sync conflict was resolved, in case the choice was wrong.": "هنگام حل آخرین تعارض همگام‌سازی ذخیره شده، برای روزی که انتخاب اشتباه از آب دربیاید.",
+  "Rescheduled days": "روزهای جابه‌جاشده",
+  "Custom exercises": "تمرین‌های شخصی",
+  "Best weights": "بهترین وزن‌ها",
+  "Whole profile": "کل پروفایل",
+  "Media size": "اندازهٔ مدیا"
 }

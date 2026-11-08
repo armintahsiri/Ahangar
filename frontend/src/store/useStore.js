@@ -5,8 +5,13 @@ import { registerCustom } from '../lib/exercises.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
 import { nextSync } from '../lib/sync-status.js'
+import {
+  pushWithMerge, mergeStates, normalizeState, topLevelHashes, withNewEpoch, resolveMerge
+} from '../lib/sync-merge.js'
 
 const KEY = 'gym_state_v1'
+const BASE_KEY = 'gym_sync_base'        // {rev, hashes} — the last state both sides agreed on
+const DISCARD_KEY = 'gym_conflict_backup' // the version set aside at the last conflict resolution
 export const DEF = {
   unit: 'kg', restSec: 90, sound: true, keepAwake: true, lang: 'en',
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
@@ -29,6 +34,15 @@ function loadState() {
 }
 
 const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
+
+// The sync base: what the server held at the last successful push/pull. Kept out of the
+// synced state on purpose — it is this device's merge ancestry, never user data.
+const readSyncBase = () => { try { return JSON.parse(localStorage.getItem(BASE_KEY)) || null } catch { return null } }
+const writeSyncBase = b => { try { localStorage.setItem(BASE_KEY, JSON.stringify(b)) } catch { /* quota — merge falls back to LWW */ } }
+// The server view (GET shape) normalized — exactly how its stored copy normalizes.
+const pinBase = (rev, state) => writeSyncBase({ rev: rev ?? null, hashes: topLevelHashes(normalizeState(state)) })
+// The version set aside the last time a conflict was resolved (Settings can restore it).
+export const readDiscardedBackup = () => { try { return JSON.parse(localStorage.getItem(DISCARD_KEY)) || null } catch { return null } }
 
 // Older sample-data versions forced a workout onto today's rest day. Remove that
 // one generated override from existing sample profiles once, while preserving any
@@ -61,7 +75,7 @@ function clearLegacySampleReschedule(state) {
 
 // The assignment comes from the coach-owned server record, never from the member's saved
 // profile. Re-apply it even when the member's local workout history is newer than the server.
-function withCoachProgram(base, remote) {
+export function withCoachProgram(base, remote) {
   const next = clone(base)
   const oldIds = new Set((next.routines || []).filter(r => r.coachManaged).map(r => r.id))
   const assigned = (remote?.routines || []).filter(r => r.coachManaged)
@@ -126,7 +140,9 @@ export const useStore = create((set, get) => {
     localStorage.removeItem('gym_guest')
     localStorage.removeItem('gym_dirty')
     localStorage.removeItem(KEY)
-    set({ sync: nextSync(null, { type: 'reset' }), storageError: false })
+    localStorage.removeItem(BASE_KEY)
+    localStorage.removeItem(DISCARD_KEY)
+    set({ sync: nextSync(null, { type: 'reset' }), storageError: false, syncConflict: null })
     persist(clone(DEF), false)
   }
 
@@ -139,6 +155,8 @@ export const useStore = create((set, get) => {
     // data, so it is neither persisted locally nor pushed to the server.
     sync: { status: 'idle', at: null },
     storageError: false,
+    // parked 409 details while the conflict sheet waits for a decision (non-persistent)
+    syncConflict: null,
 
     // Mutate a draft of S via producer fn, then persist + schedule sync.
     update(mut, push = true) {
@@ -157,30 +175,102 @@ export const useStore = create((set, get) => {
       set({ user: u })
     },
 
+    // Push through the merge controller: a 409 hands us the server's view, a clean merge is
+    // applied and retried (up to 3×), a real conflict parks in syncConflict for the sheet.
     async pushState() {
       if (!get().user) return
       clearTimeout(pushTm)
       set({ sync: nextSync(get().sync, { type: 'send' }) })
-      try { await api('/api/data', { method: 'PUT', body: JSON.stringify({ state: get().S }) }); localStorage.removeItem('gym_dirty'); set({ sync: nextSync(get().sync, { type: 'success', at: Date.now() }) }) }
-      catch (e) { localStorage.setItem('gym_dirty', '1'); set({ sync: nextSync(get().sync, { type: 'failure', at: Date.now() }) }) }
+      const r = await pushWithMerge({
+        getBase: readSyncBase,
+        getLocal: () => get().S,
+        // the in-progress workout never leaves this device; coach-owned content is
+        // re-injected from the server view the merge just came back with
+        applyLocal: (merged, serverState) => {
+          const next = withCoachProgram(clone(merged), serverState)
+          const a = get().S.active
+          if (a) next.active = a
+          persist(next, false)
+        },
+        setBase: writeSyncBase,
+        send: async (baseRev, state) => {
+          const body = { state }
+          if (baseRev != null) body.baseRev = baseRev
+          try {
+            const resp = await api('/api/data', { method: 'PUT', body: JSON.stringify(body) })
+            return { ok: true, rev: resp.rev }
+          } catch (e) {
+            if (e.status === 409 && e.data?.state) return { ok: false, rev: e.data.rev, state: e.data.state }
+            throw e
+          }
+        }
+      })
+      if (r.ok) {
+        localStorage.removeItem('gym_dirty')
+        set({ sync: nextSync(get().sync, { type: 'success', at: Date.now() }) })
+      } else if (r.conflict) {
+        localStorage.setItem('gym_dirty', '1')
+        set({ sync: nextSync(get().sync, { type: 'conflict' }), syncConflict: r })
+      } else {
+        localStorage.setItem('gym_dirty', '1')
+        set({ sync: nextSync(get().sync, { type: 'failure', at: Date.now() }) })
+      }
     },
     async pullState() {
       try {
-        const { state } = await api('/api/data')
+        const { state: serverRaw } = await api('/api/data')
         const S = get().S
         const dirty = localStorage.getItem('gym_dirty') === '1'
-        if (state && (!hasData(S) || ((state._ts || 0) >= (S._ts || 0) && !dirty))) {
+        const base = readSyncBase()
+        const adopt = raw => {
           const active = S.active
-          const next = withCoachProgram(Object.assign(clone(DEF), state), state)
+          const next = withCoachProgram(Object.assign(clone(DEF), raw), raw)
           if (active) next.active = active
           persist(next, false)
           set({ sync: nextSync(get().sync, { type: 'pull', at: Date.now() }) })
-        } else if (hasData(S)) {
-          persist(withCoachProgram(S, state), false)
-          await get().pushState()
-        } else {
-          persist(withCoachProgram(S, state), false)
         }
+        if (!serverRaw) { persist(withCoachProgram(S, serverRaw), false); return }
+        const serverRev = typeof serverRaw.rev === 'number' ? serverRaw.rev : null
+        // Without a pinned base (first run after this update, a fresh sign-in) or without a
+        // rev-speaking server, the old _ts policy stands — then the base gets pinned.
+        if (!base || serverRev == null || base.rev == null) {
+          if (serverRaw && (!hasData(S) || ((serverRaw._ts || 0) >= (S._ts || 0) && !dirty))) {
+            adopt(serverRaw)
+            pinBase(serverRev, serverRaw)
+          } else if (hasData(S)) {
+            persist(withCoachProgram(S, serverRaw), false)
+            await get().pushState()
+          } else {
+            persist(withCoachProgram(S, serverRaw), false)
+            pinBase(serverRev, serverRaw)
+          }
+          return
+        }
+        if (!dirty) {
+          if (serverRev > base.rev) {
+            adopt(serverRaw)
+            pinBase(serverRev, serverRaw)
+          }
+          return
+        }
+        // Dirty: instead of the old "local always wins", merge over the pinned base so the
+        // other device's work and this device's offline queue both survive.
+        const m = mergeStates({ baseHashes: base.hashes, local: S, server: serverRaw })
+        if (m.epochConflict || m.conflicts.length) {
+          set({
+            sync: nextSync(get().sync, { type: 'conflict' }),
+            syncConflict: { conflicts: m.conflicts, epochConflict: m.epochConflict, serverState: serverRaw, serverRev, merged: m.merged }
+          })
+          return
+        }
+        const a = S.active
+        // coach-owned content rides back in from the server view before anything persists
+        const next = withCoachProgram(clone(m.merged), serverRaw)
+        if (a) next.active = a
+        persist(next, false)
+        pinBase(serverRev, m.merged)
+        localStorage.removeItem('gym_dirty')
+        await get().pushState()
       } catch (e) { /* offline — keep local */ }
     },
 
@@ -208,6 +298,39 @@ export const useStore = create((set, get) => {
       persist(Object.assign(clone(DEF), buildDemoState()), false)
     },
 
+    // The conflict sheet's decision. Whichever version loses is stashed on this device
+    // (Settings can restore it); the winner is applied and pushed over the server rev.
+    resolveConflict(choice) {
+      const info = get().syncConflict
+      if (!info) return
+      const loser = choice === 'local' ? info.serverState : get().S
+      try { localStorage.setItem(DISCARD_KEY, JSON.stringify({ at: Date.now(), state: loser })) } catch { /* best effort */ }
+      let winner
+      if (info.epochConflict) winner = choice === 'local' ? clone(get().S) : clone(info.serverState)
+      else {
+        const base = resolveMerge(clone(info.merged), info.serverState, info.conflicts, choice)
+        winner = withCoachProgram(base, info.serverState)
+      }
+      const a = get().S.active
+      if (a) winner.active = a
+      writeSyncBase({ rev: info.serverRev ?? null, hashes: topLevelHashes(normalizeState(winner)) })
+      persist(clone(winner), false)
+      set({ syncConflict: null })
+      get().pushState()
+    },
+
+    // Settings → restore the version that was set aside at the last conflict resolution.
+    restoreDiscarded(backup) {
+      if (!backup?.state) return
+      const a = get().S.active
+      const next = clone(backup.state)
+      if (a) next.active = a
+      writeSyncBase({ rev: readSyncBase()?.rev ?? null, hashes: topLevelHashes(normalizeState(next)) })
+      persist(next, false)
+      try { localStorage.removeItem(DISCARD_KEY) } catch { /* fine */ }
+      get().pushState()
+    },
+
     // Load a realistic example training history into a self-hosted profile on request.
     async loadSampleData() {
       const { buildDemoState } = await import('../lib/demoSeed.js')
@@ -216,7 +339,8 @@ export const useStore = create((set, get) => {
         lang: current.lang, unit: current.unit, theme: current.theme,
         accent: current.accent, sound: current.sound, keepAwake: current.keepAwake
       }
-      persist(Object.assign(clone(DEF), buildDemoState(), preferences), true)
+      // a full replace: stamp a new epoch so other devices conflict instead of auto-merging
+      persist(withNewEpoch(Object.assign(clone(DEF), buildDemoState(), preferences)), true)
     },
 
     // Boot: ask the server who we are, then pull.

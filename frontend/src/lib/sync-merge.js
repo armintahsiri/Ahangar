@@ -142,7 +142,9 @@ export async function pushWithMerge(deps, retries = 0) {
     return { ok: false, conflict: true, conflicts: m.conflicts, epochConflict: m.epochConflict, serverState: resp.state, serverRev: resp.rev, merged: m.merged }
   }
   if (retries >= PUSH_MAX_RETRIES) return { ok: false, failed: true, exhausted: true }
-  deps.applyLocal(m.merged)
+  // the server view rides along so the caller can re-inject coach-owned content (it is
+  // normalized out of merged — see normalizeState)
+  deps.applyLocal(m.merged, resp.state)
   deps.setBase({ rev: resp.rev, hashes: topLevelHashes(normalizeState(m.merged)) })
   return pushWithMerge(deps, retries + 1)
 }

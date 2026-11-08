@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore, DEF } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
-import { ACCENTS, todayISO, localTZ } from '../lib/format.js'
+import { ACCENTS, todayISO, localTZ, fmtDate } from '../lib/format.js'
 import { effortOf } from '../lib/history.js'
 import { IS_ANDROID } from '../lib/api.js'
 import { pushSupported, enablePush, disablePush, sendTestPush } from '../lib/push.js'
 import { wakeLockSupported } from '../lib/wakelock.js'
 import { t, LANGS, INSTR_LANGS, dateLocale } from '../lib/i18n.js'
 import { describeSync } from '../lib/sync-status.js'
+import { withNewEpoch } from '../lib/sync-merge.js'
+import { readDiscardedBackup } from '../store/useStore.js'
 import { DEMO, REPO } from '../lib/demo.js'
 import { MOBILE, shareExport, syncReminder } from '../lib/mobile.js'
 import { loadStarterPlan, confirmSheet, importFromApp } from '../sheets.jsx'
@@ -21,11 +23,12 @@ export default function Settings() {
   const user = useStore(s => s.user)
   const sync = useStore(s => s.sync)
   const storageError = useStore(s => s.storageError)
-  const { update, replaceState, signOut, signOutAll, resetDemo, loadSampleData } = useStore()
+  const { update, replaceState, signOut, signOutAll, resetDemo, loadSampleData, restoreDiscarded } = useStore()
   const toast = useUI(s => s.toast)
   const fileRef = useRef(null)
   const importRef = useRef(null)
   const wakeOK = wakeLockSupported()
+  const [discarded, setDiscarded] = useState(() => readDiscardedBackup())
 
   const doExport = async () => {
     const json = JSON.stringify(S, null, 2)
@@ -46,7 +49,7 @@ export default function Settings() {
       try {
         const data = JSON.parse(rd.result)
         if (!data.workouts || !data.routines) throw new Error('not an openGym backup')
-        confirmSheet({ title: t('Import backup?'), message: t('This replaces all current data with the backup file.'), confirmText: t('Import'), danger: true, onConfirm: () => { replaceState(Object.assign(JSON.parse(JSON.stringify(DEF)), data), true); toast(t('Backup imported')) } })
+        confirmSheet({ title: t('Import backup?'), message: t('This replaces all current data with the backup file.'), confirmText: t('Import'), danger: true, onConfirm: () => { replaceState(withNewEpoch(Object.assign(JSON.parse(JSON.stringify(DEF)), data)), true); setDiscarded(readDiscardedBackup()); toast(t('Backup imported')) } })
       } catch (e) { toast(t('Import failed: {0}', e.message)) }
     }
     rd.readAsText(f)
@@ -197,13 +200,25 @@ export default function Settings() {
         message: user ? t('Deletes your plan, workouts and body weight everywhere — on this device, on the server, and on every device signed in to this profile. This cannot be undone.')
           : t('Deletes your plan, workouts and body weight on this device. This cannot be undone.'),
         confirmText: t('Delete everything'), danger: true,
-        onConfirm: () => { replaceState(JSON.parse(JSON.stringify(DEF)), true); nav('/home'); toast(t('All data reset')) }
+        onConfirm: () => { replaceState(withNewEpoch(JSON.parse(JSON.stringify(DEF))), true); nav('/home'); toast(t('All data reset')) }
       })} />
     </Section>
     <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={doImport} />
     {/* Reset after reading so picking the same file twice still fires onChange. */}
     <input ref={importRef} type="file" accept=".csv,.xml,text/csv,text/xml" style={{ display: 'none' }}
       onChange={ev => { const f = ev.target.files[0]; if (f) importFromApp(f); ev.target.value = '' }} />
+
+    {/* Only when a conflict resolution set a version aside — one tap brings it back. */}
+    {discarded?.state && <Section title={t('Discarded version')} footer={t('Saved when the last sync conflict was resolved, in case the choice was wrong.')}>
+      <Row icon="reset" iconTint="var(--yellow)" title={t('Restore last discarded version')}
+        subtitle={t('Discarded {0}', fmtDate(new Date(discarded.at).toISOString().slice(0, 10), true))}
+        accessory="chevron" onClick={() => confirmSheet({
+          title: t('Restore last discarded version'),
+          message: t('Restore the data that was set aside when the last sync conflict was resolved?'),
+          confirmText: t('Restore'), danger: true,
+          onConfirm: () => { restoreDiscarded(discarded); setDiscarded(readDiscardedBackup()); nav('/home'); toast(t('Version restored')) }
+        })} />
+    </Section>}
 
     {/* "Add to Home screen" makes no sense inside the native app */}
     {!MOBILE && <Section title={t('Tip')}>

@@ -9,7 +9,7 @@ import { DEMO } from './lib/demo.js'
 import { MOBILE } from './lib/mobile.js'
 import { setNav } from './lib/nav.js'
 import { useWakeLock } from './lib/wakelock.js'
-import { startFlow } from './sheets.jsx'
+import { startFlow, syncConflictSheet } from './sheets.jsx'
 import Icon from './components/Icon.jsx'
 import TabBar from './components/TabBar.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
@@ -43,6 +43,7 @@ function Shell() {
   const loc = useLocation()
   const { S, user, ready, clubName } = useStore()
   const isGuest = useStore(s => s.isGuest())
+  const syncConflict = useStore(s => s.syncConflict)
   const langV = useLang()   // re-renders the whole shell when the language (pack) changes
   useEffect(() => { setNav(navigate) }, [navigate])
   useEffect(() => { applyPrefs(S.theme, S.accent) }, [S.theme, S.accent])
@@ -53,6 +54,8 @@ function Shell() {
     document.documentElement.lang = language
     document.documentElement.dir = directionFor(language)
   }, [langV, S.lang])
+  // a sync conflict parks its details in the store — the decision sheet opens once per conflict
+  useEffect(() => { if (syncConflict) syncConflictSheet() }, [syncConflict])
   // every tab/route change starts at the top of the page
   useEffect(() => { window.scrollTo(0, 0) }, [loc.pathname])
   // bound to the workout, not to the route — checking Stats mid-session keeps the screen on

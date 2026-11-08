@@ -20,6 +20,8 @@ import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-sha
 import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
+import { addTombstone, normalizeState, topLevelHashes, resolveMerge } from './lib/sync-merge.js'
+import { withCoachProgram } from './store/useStore.js'
 
 const S = () => useStore.getState().S
 const update = (...a) => useStore.getState().update(...a)
@@ -118,7 +120,10 @@ function BwSheet({ required, onDone, close }) {
     if (onDone) onDone(n); else toast(t('Weight saved'))
   }
   const recent = [...st.bodyweight].reverse().slice(0, 3)
-  const delEntry = d => update(s => { s.bodyweight = s.bodyweight.filter(b => b.d !== d) })
+  const delEntry = d => update(s => {
+    s.bodyweight = s.bodyweight.filter(b => b.d !== d)
+    addTombstone(s, 'bodyweight', d) // the deletion must survive the union on other devices
+  })
   return <>
     <h3>{required ? t('Quick check-in') : t('Log body weight')}</h3>
     <div className="muted small">{required ? t('Slide or tap to set your weight — tracked before every workout so your curve stays honest.') : t('Today') + ', ' + fmtDate(todayISO(), true)}</div>
@@ -792,7 +797,7 @@ function WorkoutDetail({ w, close }) {
           <div className="ss">{e.sets.filter(s => s.done).map(s => setLabel(e.id, s, e.target)).join('  ·  ') || t('no sets')}</div></div>
       </div>
     })}
-    <Button variant="danger" onClick={() => confirmSheet({ title: t('Delete workout?'), message: t('This removes it from your history for good.'), confirmText: t('Delete'), danger: true, onConfirm: () => { update(s => { s.workouts = s.workouts.filter(x => x.id !== w.id) }); close(); toast(t('Workout deleted')) } })}>{t('Delete workout')}</Button>
+    <Button variant="danger" onClick={() => confirmSheet({ title: t('Delete workout?'), message: t('This removes it from your history for good.'), confirmText: t('Delete'), danger: true, onConfirm: () => { update(s => { s.workouts = s.workouts.filter(x => x.id !== w.id); addTombstone(s, 'workouts', w.id) }); close(); toast(t('Workout deleted')) } })}>{t('Delete workout')}</Button>
   </>
 }
 export const workoutDetailSheet = w => ui().openSheet(close => <WorkoutDetail w={w} close={close} />)
@@ -1027,3 +1032,40 @@ function doFinishWorkout() {
   beep(snd(), 880, 0.15); beep(snd(), 1100, 0.15, 0.18); beep(snd(), 1320, 0.3, 0.36)
   ui().openSheet(close => <FinishSummary w={w} prs={prs} e1prs={e1prs} close={close} />, { kind: 'center', locked: true })
 }
+
+/* ============================ sync conflict ============================ */
+// Human names for the state keys a conflict can name, so the sheet says "Routines",
+// not "routines". Anything unmapped shows as-is.
+const CONFLICT_LABELS = {
+  unit: 'Weight unit', lang: 'Language', theme: 'Theme', accent: 'Accent color',
+  body: 'Body diagram', targetW: 'Goal', effort: 'Effort per set', restSec: 'Rest timer',
+  keepAwake: 'Keep screen awake', sound: 'Sounds', reminder: 'Workout day reminder',
+  routines: 'Routines', week: 'Week schedule', dayPlan: 'Rescheduled days',
+  customEx: 'Custom exercises', exWeights: 'Best weights', gifSize: 'Media size',
+  epoch: 'Whole profile'
+}
+
+function SyncConflictSheet({ close }) {
+  const info = useStore(s => s.syncConflict)
+  if (!info) return null
+  const choose = choice => { close(); useStore.getState().resolveConflict(choice) }
+  return <>
+    <h3>{t('Sync conflict')}</h3>
+    {info.epochConflict
+      ? <div className="muted small" style={{ lineHeight: 1.5 }}>{t('This device and the server hold two different versions of your data — one side replaced everything. Pick which one to keep; the other is backed up on this device.')}</div>
+      : <>
+        <div className="muted small" style={{ marginBottom: 8 }}>{t('Both this device and the server changed:')}</div>
+        <div className="mchips" style={{ marginBottom: 10 }}>
+          {info.conflicts.map(k => <span key={k} className="mchip">{t(CONFLICT_LABELS[k] || k)}</span>)}
+        </div>
+        <div className="dim small">{t('Pick which version to keep — workouts and weigh-ins are combined either way. The other version is backed up on this device.')}</div>
+      </>}
+    <div style={{ height: 14 }} />
+    <Button variant="primary" onClick={() => choose('local')}>{t('Keep my version')}</Button>
+    <div style={{ height: 8 }} />
+    <Button onClick={() => choose('server')}>{t('Use the server version')}</Button>
+    <div style={{ height: 8 }} />
+    <Button variant="ghost" className="dim" onClick={close}>{t('Decide later')}</Button>
+  </>
+}
+export const syncConflictSheet = () => ui().openSheet(close => <SyncConflictSheet close={close} />)
