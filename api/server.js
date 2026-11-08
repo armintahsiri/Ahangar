@@ -88,6 +88,20 @@ const coachOf = memberId => {
   const coach = link && db.users.find(u => u.id === link.coachId);
   return coach ? { id: coach.id, name: coach.name } : null;
 };
+// The client-facing view of a member's state: the stored file plus the coach-owned
+// assignment injected (coachManaged routines, coach week days, coachProgram). GET /api/data
+// and the 409 conflict body both go through this, so clients always compare like-for-like.
+function stateView(uid, state) {
+  const assignment = assignmentFor(uid);
+  if (!state) return assignment ? { routines: (assignment.routines || []).map(r => ({ ...r, coachManaged: true })), week: assignment.week || {}, coachProgram: { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 } } : null;
+  if (assignment) {
+    const assigned = (assignment.routines || []).map(r => ({ ...r, coachManaged: true }));
+    state.routines = [...(state.routines || []).filter(r => !assigned.some(a => a.id === r.id)), ...assigned];
+    state.week = { ...(state.week || {}), ...(assignment.week || {}) };
+    state.coachProgram = { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 };
+  }
+  return state;
+}
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2)); }
 function atomicWrite(file, content) {
   // Temp file written at 0600 and fsynced, then renamed — atomic on the same filesystem,
@@ -411,23 +425,13 @@ const routes = {
   'GET /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    let state;
-    try { state = readState(user.id); }
+    let stored;
+    try { stored = readState(user.id); }
     catch (e) {
       console.error('GET /api/data', e.message);
       return json(res, 500, { error: 'state file corrupt — not overwriting; ask the server operator to restore it' });
     }
-    const assignment = assignmentFor(user.id);
-    // No file yet: serve the coach assignment alone if there is one, like the old
-    // catch-all did for a missing file — a corrupt file never reaches this path (500 above).
-    if (!state) return json(res, 200, { state: assignment ? { routines: (assignment.routines || []).map(r => ({ ...r, coachManaged: true })), week: assignment.week || {}, coachProgram: { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 } } : null });
-    if (assignment) {
-      const assigned = (assignment.routines || []).map(r => ({ ...r, coachManaged: true }));
-      state.routines = [...(state.routines || []).filter(r => !assigned.some(a => a.id === r.id)), ...assigned];
-      state.week = { ...(state.week || {}), ...(assignment.week || {}) };
-      state.coachProgram = { coach: assignment.coach, week: assignment.week || {}, version: assignment.version || 0 };
-    }
-    json(res, 200, { state });
+    json(res, 200, { state: stateView(user.id, stored) });
   },
 
   'PUT /api/data': async (req, res) => {
@@ -437,19 +441,20 @@ const routes = {
     if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
     // A corrupt existing file is data we cannot read — never overwrite it with whatever the
     // client has (that would look like a healthy sync while history is destroyed).
-    try { readState(user.id); }
+    let current;
+    try { current = readState(user.id); }
     catch (e) {
       console.error('PUT /api/data', e.message);
       return json(res, 500, { error: 'state file corrupt — not overwriting; ask the server operator to restore it' });
     }
     delete body.state.active;              // in-progress workouts stay device-local
     delete body.state.coachProgram;        // coach-owned assignment is never accepted from a member client
+    delete body.state.rev;                 // rev is server-owned; a client-sent value is ignored
     const assignment = assignmentFor(user.id);
     const assignedIds = new Set((assignment?.routines || []).map(r => r.id));
     body.state.routines = (body.state.routines || []).filter(r => r && !r.coachManaged && !assignedIds.has(r.id));
     if (assignment) {
-      const saved = readState(user.id) || {};
-      const savedWeek = saved.week || {};
+      const savedWeek = (current && current.week) || {};
       body.state.week = body.state.week || {};
       for (const day of Object.keys(assignment.week || {})) {
         if (Object.prototype.hasOwnProperty.call(savedWeek, day)) body.state.week[day] = savedWeek[day];
@@ -462,8 +467,16 @@ const routes = {
         }
       }
     }
+    // rev gate — compare and write with no await in between (single-process assumption,
+    // documented above the db definition), so two racing PUTs serialize cleanly.
+    const currentRev = current && typeof current.rev === 'number' ? current.rev : 0;
+    if (body.baseRev != null && body.baseRev !== currentRev) {
+      // stale client: hand back the server's current view so it can merge — nothing is written
+      return json(res, 409, { error: 'conflict', rev: currentRev, state: stateView(user.id, current) });
+    }
+    body.state.rev = currentRev + 1;
     atomicWrite(stateFile(user.id), JSON.stringify(body.state));
-    json(res, 200, { ok: true, ts: body.state._ts || null });
+    json(res, 200, { ok: true, rev: body.state.rev, ts: body.state._ts || null });
   },
 
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),

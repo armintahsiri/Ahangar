@@ -339,3 +339,85 @@ test('state.corrupt-db-fails-fast', () => {
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* fine */ }
   }
 })
+
+/* ---------- sync versioning (rev / baseRev) ---------- */
+test('sync.put-baserev-roundtrip', async () => {
+  const u = await registerUser('Rev Rider')
+  // first push without a base — legacy LWW path — still stamps rev 1
+  const p1 = await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })
+  assert.equal(p1.status, 200)
+  assert.equal(p1.json.rev, 1)
+  // matching base advances rev
+  const p2 = await call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { unit: 'kg', workouts: [{ id: 'w1', d: '2026-11-09' }], routines: [] } } })
+  assert.equal(p2.status, 200)
+  assert.equal(p2.json.rev, 2)
+  const get = await call('GET', '/api/data', { token: u.token })
+  assert.equal(get.json.state.rev, 2)
+  assert.equal(get.json.state.workouts.length, 1)
+})
+
+test('sync.put-stale-baserev-409-writes-nothing', async () => {
+  const u = await registerUser('Stale Sally')
+  await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })
+  const newer = await call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { unit: 'kg', workouts: [{ id: 'w9', d: '2026-11-09' }], routines: [] } } })
+  assert.equal(newer.json.rev, 2)
+  // another device pushes from rev 1 — stale
+  const stale = await call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { unit: 'lb', workouts: [], routines: [] } } })
+  assert.equal(stale.status, 409)
+  assert.equal(stale.json.error, 'conflict')
+  assert.equal(stale.json.rev, 2)
+  // the conflict body carries the server's current view (rev + data), coach-style fields included
+  assert.equal(stale.json.state.rev, 2)
+  assert.equal(stale.json.state.workouts[0].id, 'w9')
+  // nothing was written: GET still returns rev 2 with the winner's data
+  const get = await call('GET', '/api/data', { token: u.token })
+  assert.equal(get.json.state.rev, 2)
+  assert.equal(get.json.state.workouts.length, 1)
+})
+
+test('sync.put-no-baserev-legacy-lww', async () => {
+  const u = await registerUser('Legacy Luke')
+  await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })
+  await call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { unit: 'kg', workouts: [], routines: [] } } })
+  // an old client sends no baseRev at all — behavior stays last-write-wins, rev still advances
+  const legacy = await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'lb', workouts: [], routines: [] } } })
+  assert.equal(legacy.status, 200)
+  assert.equal(legacy.json.rev, 3)
+})
+
+test('sync.client-rev-ignored', async () => {
+  const u = await registerUser('Rev Spoofer')
+  await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })
+  // a client trying to dictate its own rev is ignored — the server owns the counter
+  const sneaky = await call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { rev: 999, unit: 'kg', workouts: [], routines: [] } } })
+  assert.equal(sneaky.status, 200)
+  assert.equal(sneaky.json.rev, 2)
+  const get = await call('GET', '/api/data', { token: u.token })
+  assert.equal(get.json.state.rev, 2)
+})
+
+test('sync.concurrent-put-one-wins', async () => {
+  const u = await registerUser('Racer Ray')
+  await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } }) // rev 1
+  // two devices push from the same base simultaneously — exactly one may win
+  const [a, b] = await Promise.all([
+    call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { unit: 'kg', workouts: [{ id: 'wa', d: '2026-11-09' }], routines: [] } } }),
+    call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { unit: 'kg', workouts: [{ id: 'wb', d: '2026-11-09' }], routines: [] } } })
+  ])
+  const statuses = [a.status, b.status].sort()
+  assert.deepEqual(statuses, [200, 409])
+  const get = await call('GET', '/api/data', { token: u.token })
+  assert.equal(get.json.state.rev, 2)
+  assert.equal(get.json.state.workouts.length, 1)
+})
+
+test('sync.corrupt-file-still-500-with-baserev', async () => {
+  const u = await registerUser('Corrupt Again')
+  assert.equal((await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', workouts: [], routines: [] } } })).status, 200)
+  const file = path.join(TMP, `state-${u.id}.json`)
+  fs.writeFileSync(file, '{oops', { mode: 0o600 })
+  // the corrupt pre-check fires before the rev gate — a 500, never a 409 or a write
+  const r = await call('PUT', '/api/data', { token: u.token, body: { baseRev: 1, state: { unit: 'kg', workouts: [], routines: [] } } })
+  assert.equal(r.status, 500)
+  assert.equal(fs.readFileSync(file, 'utf8'), '{oops')
+})
