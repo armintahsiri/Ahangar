@@ -317,6 +317,34 @@ function serveMedia(req, res, pathname) {
   fs.createReadStream(file).pipe(res);
 }
 
+/* ---------- state summary cache (admin/coach lists) ---------- */
+// The admin dashboard polls every 15s and reads every member's state file just for three
+// numbers. Cached against (mtimeMs, size): any rewrite — a sync, a script — changes both and
+// misses; an unchanged file is never re-read or re-parsed. Live presence stays outside the
+// cache (it is memory already) and the map is bounded by dropping entries whose file left.
+const summaryCache = new Map();   // state file path -> { key, summary }
+function stateSummary(uid) {
+  const file = stateFile(uid);
+  let key = null;
+  try { const st = fs.statSync(file); key = `${st.mtimeMs}:${st.size}`; }
+  catch { summaryCache.delete(file); return { corrupt: false, workouts: 0, lastWorkout: null, lastSync: null, missing: true }; }
+  const hit = summaryCache.get(file);
+  if (hit && hit.key === key) return hit.summary;
+  let summary;
+  try {
+    const S = readState(uid) || {};
+    const workouts = S.workouts || [];
+    const last = workouts[workouts.length - 1];
+    summary = { corrupt: false, workouts: workouts.length, lastWorkout: last ? last.d : null, lastSync: S._ts || null };
+  } catch (e) {
+    // corrupt: cached behind the same stat key — an operator fixing the file changes its
+    // mtime and the next poll re-reads it
+    summary = { corrupt: true, workouts: 0, lastWorkout: null, lastSync: null };
+  }
+  summaryCache.set(file, { key, summary });
+  return summary;
+}
+
 /* ---------- sessions (signed cookie) ---------- */
 function sign(payload) {
   const mac = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
@@ -777,24 +805,25 @@ const routes = {
   // One row per user, cheap enough for a personal instance (reads each state file once).
   'GET /api/admin/users': async (req, res) => {
     if (!requireAdmin(req, res)) return;
+    const seen = new Set();
     const users = db.users.map(u => {
-      let S;
-      try { S = readState(u.id) || {}; }
-      catch (e) { S = { corrupt: true }; }   // additive flag — one broken file must not take the list down
-      const workouts = S.workouts || [];
-      const last = workouts[workouts.length - 1];
+      seen.add(stateFile(u.id));
+      const s = stateSummary(u.id);
+      const workouts = s.workouts;
+      const last = s.lastWorkout;
       return {
         id: u.id, name: u.name, phone: u.phone || null, created: u.created || null,
         disabled: !!u.disabled, admin: isAdmin(u), envAdmin: ADMIN_UIDS.includes(u.id), role: isCoach(u) ? 'coach' : 'member', invitedBy: u.invitedBy || null,
         coach: isCoach(u) || isAdmin(u) ? null : coachOf(u.id),
-        corrupt: !!S.corrupt,
-        workouts: workouts.length,
-        lastWorkout: last ? last.d : null,
-        lastSync: S._ts || null,
+        corrupt: !!s.corrupt,
+        workouts,
+        lastWorkout: last,
+        lastSync: s.lastSync,
         hasPush: db.subs.some(s => s.userId === u.id),
         live: livePresence(u.id)
       };
     });
+    for (const k of [...summaryCache.keys()]) if (!seen.has(k)) summaryCache.delete(k);   // keep the map bounded
     json(res, 200, { users, invite_only: INVITE_ONLY, now: Date.now() });
   },
 
@@ -919,13 +948,10 @@ const routes = {
     const clients = links.map(link => {
       const u = db.users.find(x => x.id === link.memberId);
       if (!u || u.disabled) return null;
-      let state;
-      try { state = readState(u.id) || {}; }
-      catch (e) { state = { corrupt: true }; }   // additive flag — see GET /api/admin/users
-      const workouts = state.workouts || [];
+      const s = stateSummary(u.id);   // same cache the admin list uses
       return { id: u.id, name: u.name, disabled: !!u.disabled, created: u.created || null,
-        corrupt: !!state.corrupt,
-        workouts: workouts.length, lastWorkout: workouts.at(-1)?.d || null,
+        corrupt: !!s.corrupt,
+        workouts: s.workouts, lastWorkout: s.lastWorkout,
         assignment: db.coachAssignments.find(x => x.coachId === coach.id && x.memberId === u.id) || null };
     }).filter(Boolean);
     json(res, 200, { clients });

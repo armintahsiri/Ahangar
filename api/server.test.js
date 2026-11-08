@@ -751,6 +751,35 @@ test('media tools: inline round-trip is byte-exact, gc removes only unreferenced
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
+/* ---------- admin/coach list cache ---------- */
+test('admin.cache: identical responses, invalidated by any rewrite, corrupt never crashes', async () => {
+  const at = await admin()
+  const u = await registerUser('Cached Carl')
+  const usersOf = async () => (await call('GET', '/api/admin/users', { token: at })).json.users
+  const before = await usersOf()
+  const again = await usersOf()                       // second read comes from the cache
+  assert.deepEqual(again, before)
+  const rowOf = list => list.find(x => x.id === u.id)
+  assert.equal(rowOf(before).workouts, 0)
+  // a normal sync (PUT /api/data) invalidates the summary immediately
+  await call('PUT', '/api/data', { token: u.token, body: { state: { unit: 'kg', routines: [], workouts: [{ id: 'w1', d: '2026-11-09' }, { id: 'w2', d: '2026-11-10' }] } } })
+  assert.equal(rowOf(await usersOf()).workouts, 2)
+  assert.equal(rowOf(await usersOf()).workouts, 2)    // and the fresh value is what's cached
+  // a direct on-disk rewrite (mtime/size change) is picked up too
+  const file = path.join(TMP, `state-${u.id}.json`)
+  const disk = JSON.parse(fs.readFileSync(file, 'utf8'))
+  disk.workouts.push({ id: 'w3', d: '2026-11-11' })
+  disk.extra = 'changes the size too'
+  fs.writeFileSync(file, JSON.stringify(disk))
+  assert.equal(rowOf(await usersOf()).workouts, 3)
+  // coach clients list rides the same cache
+  const coach = await registerUser('Cache Coach')
+  await call('POST', '/api/admin/user/role', { token: at, body: { id: coach.id, role: 'coach' } })
+  await call('POST', '/api/admin/user/coach', { token: at, body: { id: u.id, coachId: coach.id } })
+  const clients = (await call('GET', '/api/coach/clients', { token: coach.token })).json.clients
+  assert.equal(clients.find(c => c.id === u.id).workouts, 3)
+})
+
 /* ---------- sync versioning (rev / baseRev) ---------- */
 test('sync.put-baserev-roundtrip', async () => {
   const u = await registerUser('Rev Rider')
