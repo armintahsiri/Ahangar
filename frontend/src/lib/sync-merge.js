@@ -56,9 +56,18 @@ export const TOMBSTONE_CAP = 1000
 const keyOf = (listKey, item) => (listKey === 'bodyweight' ? item?.d : item?.id)
 
 function unionList(listKey, local, server, tombstones) {
+  const put = item => {
+    const k = keyOf(listKey, item)
+    if (k == null || tombstones.has(k)) return
+    const cur = map.get(k)
+    if (!cur) { map.set(k, item); return }
+    // two readings of the same day: the later measurement wins (both carry a `t` stamp),
+    // tie → local (it is inserted first). Workouts are immutable rows — same id, same content.
+    if (listKey === 'bodyweight' && (item.t || 0) > (cur.t || 0)) map.set(k, item)
+  }
   const map = new Map()
-  for (const item of server || []) { const k = keyOf(listKey, item); if (k != null && !tombstones.has(k)) map.set(k, item) }
-  for (const item of local || []) { const k = keyOf(listKey, item); if (k != null && !tombstones.has(k)) map.set(k, item) } // local wins shared keys
+  for (const item of local || []) put(item)
+  for (const item of server || []) put(item)
   return [...map.values()]
 }
 function unionTombstones(a, b) {
@@ -68,15 +77,50 @@ function unionTombstones(a, b) {
 }
 const tombSet = (ln, sn, kind) => unionTombstones(ln.deletedIds?.[kind], sn.deletedIds?.[kind])
 
+// Bodyweight tombstones carry the deletion time ({d, at}) so a later re-log can beat them;
+// phase-2 legacy strings read as "deleted at 0" (older than anything stamped). The map keeps
+// the newest deletion time per date.
+function bwTombstoneMap(ln, sn) {
+  const m = new Map()
+  const add = x => {
+    const e = typeof x === 'string' ? { d: x, at: 0 } : x
+    if (!e?.d) return
+    const prev = m.get(e.d)
+    if (prev === undefined || (e.at || 0) > prev) m.set(e.d, e.at || 0)
+  }
+  for (const x of ln.deletedIds?.bodyweight || []) add(x)
+  for (const x of sn.deletedIds?.bodyweight || []) add(x)
+  // a live reading stamped at or after the deletion beats the tombstone — the user logged
+  // the day again after removing it, so the removal is history, not a pending deletion
+  for (const list of [ln.bodyweight || [], sn.bodyweight || []]) {
+    for (const b of list) { const at = m.get(b.d); if (at !== undefined && (b.t || 0) >= at) m.delete(b.d) }
+  }
+  return m
+}
+
 /* ---------- tombstones ---------- */
 // Every deletion of a synced record writes one of these, so a deletion made offline (or on
-// device A) survives the union on device B instead of reviving the row.
+// device A) survives the union on device B instead of reviving the row. Workouts keep plain
+// ids (an id is never re-issued); bodyweight tombstones are {d, at} because a day can be
+// legitimately re-logged after its deletion — the timestamp is what tells the two apart.
 export function addTombstone(state, kind, key) {
   if (!state || key == null) return
   const d = (state.deletedIds && typeof state.deletedIds === 'object') ? state.deletedIds : (state.deletedIds = {})
   const list = Array.isArray(d[kind]) ? d[kind] : []
-  if (!list.includes(key)) list.push(key)
+  const entry = kind === 'bodyweight' ? { d: key, at: Date.now() } : key
+  if (!list.some(x => (typeof x === 'string' ? x === key : x.d === key))) list.push(entry)
   d[kind] = list.slice(-TOMBSTONE_CAP)
+}
+// A fresh log for a key clears its deletion record — without this, the next union would
+// drop the new weigh-in as if it were still deleted.
+export function removeTombstone(state, kind, key) {
+  if (!state?.deletedIds || key == null) return
+  const list = state.deletedIds[kind]
+  if (!Array.isArray(list)) return
+  const next = list.filter(x => (typeof x === 'string' ? x !== key : x.d !== key))
+  if (next.length) state.deletedIds[kind] = next
+  else delete state.deletedIds[kind]
+  if (!Object.keys(state.deletedIds).length) delete state.deletedIds
 }
 
 /* ---------- the merge itself ---------- */
@@ -101,12 +145,19 @@ export function mergeStates({ baseHashes, local, server }) {
     else if (hL === hS) continue                                // both changed to the same thing
     else conflicts.push(k)                                      // both changed, differently
   }
-  // append-only lists: union of both sides minus the merged tombstones
-  const tw = tombSet(ln, sn, 'workouts'), tb = tombSet(ln, sn, 'bodyweight')
+  // append-only lists: union of both sides minus the merged tombstones. Bodyweight
+  // tombstones are time-aware (bwTombstoneMap) so a post-deletion re-log survives.
+  const tw = tombSet(ln, sn, 'workouts')
+  const bwTomb = bwTombstoneMap(ln, sn)
+  const bwTombKeys = new Set(bwTomb.keys())
   merged.workouts = unionList('workouts', ln.workouts, sn.workouts, new Set(tw))
-  merged.bodyweight = unionList('bodyweight', ln.bodyweight, sn.bodyweight, new Set(tb))
-  if (tw.length || tb.length) merged.deletedIds = { workouts: tw, bodyweight: tb }
-  else delete merged.deletedIds
+  merged.bodyweight = unionList('bodyweight', ln.bodyweight, sn.bodyweight, bwTombKeys)
+  if (tw.length || bwTomb.size) {
+    merged.deletedIds = {
+      workouts: tw,
+      bodyweight: [...bwTomb.entries()].slice(-TOMBSTONE_CAP).map(([d, at]) => ({ d, at }))
+    }
+  } else delete merged.deletedIds
   return { merged, conflicts, epochConflict: false }
 }
 

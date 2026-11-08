@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   hashKey, topLevelHashes, normalizeState, mergeStates, resolveMerge,
-  pushWithMerge, addTombstone, withNewEpoch, PUSH_MAX_RETRIES
+  pushWithMerge, addTombstone, removeTombstone, withNewEpoch, PUSH_MAX_RETRIES
 } from './sync-merge.js'
 
 // base hashes for a state, the way the store records them after a successful sync
@@ -76,10 +76,28 @@ describe('mergeStates — append-only lists', () => {
     expect(merged.bodyweight.length).toBe(3)
   })
   it('bodyweight tombstones are dates and prevent revival', () => {
-    const local = { bodyweight: [], deletedIds: { bodyweight: ['2026-11-01'] } }
-    const server = { bodyweight: [{ d: '2026-11-01', w: 80.0 }] }
+    // deletion happened at t=9000; the other device still carries the older reading (t=1000)
+    const local = { bodyweight: [], deletedIds: { bodyweight: [{ d: '2026-11-01', at: 9000 }] } }
+    const server = { bodyweight: [{ d: '2026-11-01', w: 80.0, t: 1000 }] }
     const { merged } = mergeStates({ baseHashes: base.hashes, local, server })
     expect(merged.bodyweight).toEqual([])
+    expect(merged.deletedIds.bodyweight).toEqual([{ d: '2026-11-01', at: 9000 }])
+  })
+  it('a weigh-in re-logged AFTER its deletion survives the merge', () => {
+    // device A deleted the 2026-11-01 weigh-in (tombstone at 9000); device B re-logged the
+    // day afterwards (t=10000, its own tombstone copy already cleared by the write path)
+    const local = { bodyweight: [{ d: '2026-11-01', w: 81.5, t: 10000 }] }
+    const server = { bodyweight: [], deletedIds: { bodyweight: [{ d: '2026-11-01', at: 9000 }] } }
+    const { merged } = mergeStates({ baseHashes: base.hashes, local, server })
+    expect(merged.bodyweight.some(b => b.d === '2026-11-01')).toBe(true)
+    expect(merged.bodyweight[0].w).toBe(81.5)
+    expect(merged.deletedIds?.bodyweight || []).toEqual([]) // the stale tombstone is dropped
+  })
+  it('same-day weigh-in with two readings: the later measurement wins', () => {
+    const local = { bodyweight: [{ d: '2026-11-01', w: 80.2, t: 1000 }] }
+    const server = { bodyweight: [{ d: '2026-11-01', w: 80.5, t: 2000 }] }
+    const { merged } = mergeStates({ baseHashes: base.hashes, local, server })
+    expect(merged.bodyweight.find(b => b.d === '2026-11-01').w).toBe(80.5)
   })
 })
 
@@ -164,14 +182,21 @@ describe('resolveMerge', () => {
   })
 })
 
-describe('addTombstone', () => {
-  it('records and caps', () => {
+describe('addTombstone / removeTombstone', () => {
+  it('records and caps; bodyweight tombstones carry the deletion time', () => {
     const s = {}
     for (let i = 0; i < 1005; i++) addTombstone(s, 'workouts', `w${i}`)
     expect(s.deletedIds.workouts.length).toBe(1000)
     expect(s.deletedIds.workouts[0]).toBe('w5')
     addTombstone(s, 'bodyweight', '2026-11-01')
-    expect(s.deletedIds.bodyweight).toEqual(['2026-11-01'])
+    expect(s.deletedIds.bodyweight).toEqual([{ d: '2026-11-01', at: expect.any(Number) }])
+  })
+  it('re-logging a day clears its tombstone', () => {
+    const s = { deletedIds: { bodyweight: [{ d: '2026-11-01', at: 1 }, { d: '2026-11-02', at: 2 }] } }
+    removeTombstone(s, 'bodyweight', '2026-11-01')
+    expect(s.deletedIds.bodyweight).toEqual([{ d: '2026-11-02', at: 2 }])
+    removeTombstone(s, 'bodyweight', '2026-11-02')
+    expect(s.deletedIds).toBeUndefined() // empty record is dropped entirely
   })
 })
 

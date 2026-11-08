@@ -20,6 +20,7 @@
 
 import { EXDB, EXIDX } from './exercises.js'
 import { uid } from './format.js'
+import { removeTombstone } from './sync-merge.js'
 
 /* ----------------------------------------------------------------- CSV ---- */
 
@@ -509,6 +510,8 @@ export function mergeImport(S, parsed) {
     const have = new Set(S.bodyweight.map(b => b.d))
     const fresh = parsed.bodyweight.filter(b => !have.has(b.d))
     S.bodyweight = [...S.bodyweight, ...fresh].sort((a, b) => (a.d < b.d ? -1 : 1))
+    // an import is a fresh log — it clears any older deletion record for those days
+    fresh.forEach(b => removeTombstone(S, 'bodyweight', b.d))
     return { added: fresh.length, skipped: parsed.bodyweight.length - fresh.length }
   }
   const have = new Set(S.workouts.map(w => w.d))

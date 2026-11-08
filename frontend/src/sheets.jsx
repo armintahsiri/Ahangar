@@ -20,7 +20,7 @@ import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-sha
 import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
-import { addTombstone, normalizeState, topLevelHashes, resolveMerge } from './lib/sync-merge.js'
+import { addTombstone, removeTombstone, normalizeState, topLevelHashes, resolveMerge } from './lib/sync-merge.js'
 import { withCoachProgram } from './store/useStore.js'
 
 const S = () => useStore.getState().S
@@ -115,6 +115,7 @@ function BwSheet({ required, onDone, close }) {
       const ex = s.bodyweight.find(b => b.d === iso)
       if (ex) { ex.w = n; ex.t = Date.now() } else s.bodyweight.push({ d: iso, w: n, t: Date.now() })
       s.bodyweight.sort((a, b) => (a.d < b.d ? -1 : 1))
+      removeTombstone(s, 'bodyweight', iso) // a fresh log outranks an older deletion on other devices
     })
     close()
     if (onDone) onDone(n); else toast(t('Weight saved'))
