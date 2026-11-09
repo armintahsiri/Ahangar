@@ -1,5 +1,84 @@
 # Changelog
 
+## Unreleased
+
+Seven phases of hardening, sync and Persian polish on top of v1.2.4. The data format is
+backward-compatible throughout — old state files, backups and the server's JSON store work
+without any migration.
+
+### Sync that stops losing work
+
+- **Conflicts resolve instead of colliding.** The server stamps every state with a revision;
+  a push from a stale device gets a 409 with the server's copy, and the device merges the two
+  (workouts and weigh-ins union by id, deletions remembered as tombstones so a deleted set
+  never resurrects, same-day weigh-ins resolved by the later measurement, rescheduled days
+  merged per date). Real divergence — both devices editing the same setting — opens a small
+  sheet: keep mine, or take the server's, with the losing version backed up on the device.
+  A whole-profile replace (backup import, reset, sample data) is marked with an epoch and
+  never auto-merged over the other side.
+- **Best-weight memory merges too**: the heavier confirmed weight wins, ties by date, and the
+  merged workouts act as a floor. Deleting a custom exercise takes its weight entry along.
+- **Sync failures are visible.** Settings shows sync status (synced / pending / failed /
+  conflict) and Home shows a small marker while a push is failing; a quota-exceeded local
+  storage no longer breaks the screen silently.
+
+### Personal media out of the state file
+
+- Custom exercise GIFs/MP4s (up to 1 MB each) are stored on the server, content-addressed by
+  sha256, and the state keeps only a reference — a state that used to burst past nginx's
+  upload limit now stays a few hundred bytes per exercise. Dedupe means two profiles sharing
+  a file store it once; per-profile quota (40 files / 30 MB by default) and a per-IP upload
+  throttle keep it bounded. Serving supports HTTP ranges (video scrubbing on iOS) and requires
+  a signed-in account.
+- A one-pass migration moves existing inline media to the server when the operator sets
+  `MEDIA_MIGRATE=1`; until then everything keeps working inline as before. `scripts/gc-media.mjs`
+  collects unreferenced blobs (dry run by default) and `scripts/inline-media.mjs` rolls the
+  whole thing back. Backups stay self-contained: export fetches the blobs and embeds them.
+
+### Security hardening
+
+- Cross-site state-changing requests are refused by an Origin check; the login response burns
+  the same scrypt work for an unknown number as for a wrong password, so probing phone numbers
+  by timing is out.
+- Rate limits gained a per-IP layer (logins, signups, credential changes, media uploads) that
+  reads the real client IP through `TRUST_PROXY` hops; attempt buckets are pruned and capped.
+- nginx now sends security headers on every response (nosniff, no-referrer, a permissions
+  policy, a safe-start CSP plus a full CSP in report-only mode for auditing), raises the /api
+  body limit to match the API, and forwards the host with its port.
+- A state file or db.json that fails to parse fails loudly instead of starting empty: corrupt
+  files are snapshotted and never silently overwritten; atomic writes are fsynced and
+  owner-only (0600). The daily workout reminder no longer fires for disabled accounts.
+- `scripts/reset-password.mjs` is the documented break-glass way back in, and
+  `docs/SECURITY.md` collects the operator notes (what a `./data` backup is worth, what lives
+  only in memory).
+
+### Coach, admin and privacy
+
+- The admin dashboard reads lighter (a stat-keyed cache instead of re-parsing every profile
+  every 15 seconds) and shows who is training right now as before; invite codes, disable/
+  promote and per-member history are unchanged in behaviour but covered by tests now.
+- The coach dashboard states plainly what a coach can and cannot see; the signup sheet and
+  Settings say who can view your data, and nothing leaves the server.
+- Changing the weight unit now warns that history is relabelled, not converted.
+
+### Persian experience
+
+- **Exercise names in Persian** for 146 of the most-trained movements — lists, picker, workout
+  screen, history, PRs, coach reports and the printed plan — with the English name kept small
+  underneath in the details. Search understands Persian and English ("بنچ" and "bench" both
+  find the same lift); the shared plan file stays id-based. A generated review sheet
+  (`docs/exnames-review.md`) awaits a human pass over the terminology.
+- **Optional Persian digits** (Settings, visible in Persian only): a central converter re-glyphs
+  numbers, dates and the calendar; inputs, codes and phone numbers stay Latin. Off by default.
+- The calendar, week strip and stat tiles join the same digit path, and durations convert too.
+
+### For self-hosters
+
+- Everything ships in the same `docker compose up -d --build`; `MEDIA_MIGRATE=0` keeps the
+  pre-existing behaviour until you opt in, and the rollback path for media is a script, not a
+  migration. `docs/SELF_HOSTING.md` gains HSTS and TRUST_PROXY guidance;
+  `docs/SECURITY.md` is new.
+
 ## v1.2.4 — 2026-08-01
 
 The effort ratings you have been recording since v1.2.3 now answer questions, and bodyweight
