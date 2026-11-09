@@ -77,6 +77,89 @@ function unionTombstones(a, b) {
 }
 const tombSet = (ln, sn, kind) => unionTombstones(ln.deletedIds?.[kind], sn.deletedIds?.[kind])
 
+/* ---------- custom per-key merges (phase 7b: exWeights, dayPlan) ---------- */
+// Both sides changed the key relative to the base → today that meant a whole-key conflict.
+// These two keys are safe (and much nicer) to merge mechanically:
+//  - exWeights is monotonic-up by design (the heaviest confirmed working weight), so the
+//    heavier value wins; ties go to the newer date. A floor keeps the merged entry honest
+//    against the merged workouts — upgrade only, never created from thin air.
+//  - dayPlan merges per date; on genuine divergence the pushing device wins (local).
+
+// mirrors history.js bestWeightFor (max of done-set weights and topW) — reimplemented here
+// as a pure scan so this module stays dependency-free
+const bestLoad = (workouts, exId) => {
+  let best = 0
+  for (const w of workouts || []) {
+    for (const e of w.entries || []) {
+      if (e.id !== exId) continue
+      for (const s of e.sets || []) if (s.done && (s.w || 0) > best) best = s.w
+      if ((e.topW || 0) > best) best = e.topW
+    }
+  }
+  return best
+}
+
+// the date of the session that produced the best load, for the floor upgrade's `d`
+const bestLoadDate = (workouts, exId) => {
+  let best = 0, d = null
+  for (const w of workouts || []) {
+    for (const e of w.entries || []) {
+      if (e.id !== exId) continue
+      for (const s of e.sets || []) if (s.done && (s.w || 0) > best) { best = s.w; d = w.d || null }
+      if ((e.topW || 0) > best) { best = e.topW; d = w.d || null }
+    }
+  }
+  return d
+}
+
+export function mergeExWeights({ local, server, mergedWorkouts, baseCustomIds }) {
+  // a custom exercise deleted anywhere in the ancestry takes its weight entry with it;
+  // without a base snapshot only the two live sides are known (an orphan can then survive
+  // a both-sides-deleted edge — harmless, gc-free display blank)
+  const customIds = new Set([...(baseCustomIds || [])])
+  for (const c of local?.customEx || []) if (c?.id) customIds.add(c.id)
+  for (const c of server?.customEx || []) if (c?.id) customIds.add(c.id)
+  const stillExists = id => !customIds.has(id) || (local?.customEx || []).some(c => c?.id === id) || (server?.customEx || []).some(c => c?.id === id)
+
+  const lw = local?.exWeights || {}, sw = server?.exWeights || {}
+  const out = {}
+  for (const id of new Set([...Object.keys(lw), ...Object.keys(sw)])) {
+    if (customIds.has(id) && !stillExists(id)) continue   // deleted custom exercise
+    const L = lw[id], S = sw[id]
+    let win
+    if (!S) win = L
+    else if (!L) win = S
+    else if ((S.w || 0) > (L.w || 0)) win = S
+    else if ((L.w || 0) > (S.w || 0)) win = L
+    else win = String(S.d || '') >= String(L.d || '') ? S : L   // equal weight → newer date
+    if (!win) continue
+    // floor against the merged workouts — upgrade only, never create an entry from nothing
+    const floor = bestLoad(mergedWorkouts, id)
+    if (floor > (win.w || 0)) win = { w: floor, d: bestLoadDate(mergedWorkouts, id) || win.d || null }
+    out[id] = { ...win }
+  }
+  return out
+}
+
+export function mergeDayPlan({ baseDayPlan, local, server }) {
+  const b = baseDayPlan || {}, l = local || {}, s = server || {}
+  const out = {}
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
+  for (const k of new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(s)])) {
+    const bv = has(b, k) ? b[k] : undefined
+    const lv = has(l, k) ? l[k] : undefined
+    const sv = has(s, k) ? s[k] : undefined
+    if (lv === sv) { if (lv !== undefined) out[k] = lv; continue }   // same on both sides
+    if (lv === bv) { if (sv !== undefined) out[k] = sv; continue }   // local untouched → server (incl. deletion)
+    if (sv === bv) { if (lv !== undefined) out[k] = lv; continue }   // server untouched → local (incl. deletion)
+    if (lv !== undefined) out[k] = lv                                // genuine divergence → pushing device wins
+  }
+  return out
+}
+
+// classification for the custom keys — skipped by the generic three-way loop
+const CUSTOM_KEYS = ['exWeights']                            // merged by its own rule (dayPlan joins in its step)
+
 // Bodyweight tombstones carry the deletion time ({d, at}) so a later re-log can beat them;
 // phase-2 legacy strings read as "deleted at 0" (older than anything stamped). The map keeps
 // the newest deletion time per date.
@@ -124,7 +207,7 @@ export function removeTombstone(state, kind, key) {
 }
 
 /* ---------- the merge itself ---------- */
-export function mergeStates({ baseHashes, local, server }) {
+export function mergeStates({ baseHashes, baseSnap, local, server }) {
   const ln = normalizeState(local), sn = normalizeState(server)
   // epoch: "this state was wholly replaced" — never auto-merge across that boundary
   if (ln.epoch != null && sn.epoch != null && ln.epoch !== sn.epoch) {
@@ -134,7 +217,7 @@ export function mergeStates({ baseHashes, local, server }) {
   const conflicts = []
   const keys = new Set([...Object.keys(baseHashes || {}), ...Object.keys(ln), ...Object.keys(sn)])
   for (const k of keys) {
-    if (DEVICE_KEYS.includes(k) || COACH_KEYS.includes(k) || LIST_KEYS.includes(k)) continue
+    if (DEVICE_KEYS.includes(k) || COACH_KEYS.includes(k) || LIST_KEYS.includes(k) || CUSTOM_KEYS.includes(k)) continue
     const hB = baseHashes && k in baseHashes ? baseHashes[k] : undefined
     const hL = k in ln ? hashKey(ln[k]) : undefined
     const hS = k in sn ? hashKey(sn[k]) : undefined
@@ -158,6 +241,16 @@ export function mergeStates({ baseHashes, local, server }) {
       bodyweight: [...bwTomb.entries()].slice(-TOMBSTONE_CAP).map(([d, at]) => ({ d, at }))
     }
   } else delete merged.deletedIds
+  // custom per-key merges — only when BOTH sides changed (one-side-changed already keeps
+  // the changed side through the {...local} spread above)
+  for (const k of CUSTOM_KEYS) {
+    const hB = baseHashes && k in baseHashes ? baseHashes[k] : undefined
+    const hL = k in ln ? hashKey(ln[k]) : undefined
+    const hS = k in sn ? hashKey(sn[k]) : undefined
+    const lc = hL !== hB, sc = hS !== hB
+    if (!lc || !sc) continue
+    if (k === 'exWeights') merged.exWeights = mergeExWeights({ local: ln, server: sn, mergedWorkouts: merged.workouts, baseCustomIds: baseSnap?.customIds })
+  }
   return { merged, conflicts, epochConflict: false }
 }
 

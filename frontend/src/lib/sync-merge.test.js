@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   hashKey, topLevelHashes, normalizeState, mergeStates, resolveMerge,
-  pushWithMerge, addTombstone, removeTombstone, withNewEpoch, PUSH_MAX_RETRIES,
+  pushWithMerge, mergeExWeights, addTombstone, removeTombstone, withNewEpoch, PUSH_MAX_RETRIES,
   withSnap, BASE_SNAP_MAX
 } from './sync-merge.js'
 
@@ -166,6 +166,52 @@ describe('mergeStates — key classes and epoch', () => {
     })
     expect(epochConflict).toBe(false)
     expect(conflicts).toEqual([])
+  })
+})
+
+describe('mergeExWeights (phase 7b)', () => {
+  // mergeStates with both sides having changed exWeights routes here; call the merger
+  // directly with mergedWorkouts supplied by the union, exactly as mergeStates does.
+  const ex = (w, d) => ({ w, d })
+  const mergedWorkouts = [{ id: 'w1', d: '2026-01-02', entries: [{ id: 'x', sets: [{ done: true, w: 90 }], topW: 95 }] }]
+
+  it('distinct ids union', () => {
+    const r = mergeExWeights({ local: { exWeights: { a: ex(80, '2026-01-01') } }, server: { exWeights: { b: ex(60, '2026-01-02') } }, mergedWorkouts: [] })
+    expect(r).toEqual({ a: ex(80, '2026-01-01'), b: ex(60, '2026-01-02') })
+  })
+  it('same id: heavier wins regardless of date', () => {
+    const r = mergeExWeights({ local: { exWeights: { x: ex(100, '2026-01-01') } }, server: { exWeights: { x: ex(90, '2026-02-01') } }, mergedWorkouts: [] })
+    expect(r.x).toEqual(ex(100, '2026-01-01'))
+  })
+  it('equal weight: newer ISO date wins; missing d counts as oldest', () => {
+    expect(mergeExWeights({ local: { exWeights: { x: ex(90, '2026-02-01') } }, server: { exWeights: { x: ex(90, '2026-01-01') } }, mergedWorkouts: [] }).x.d).toBe('2026-02-01')
+    expect(mergeExWeights({ local: { exWeights: { x: ex(90) } }, server: { exWeights: { x: ex(90, '2026-01-01') } }, mergedWorkouts: [] }).x.d).toBe('2026-01-01')
+  })
+  it('floor upgrades a lighter merged entry with the session date, and never creates an id', () => {
+    const r = mergeExWeights({ local: { exWeights: { x: ex(80, '2026-01-01') } }, server: { exWeights: { x: ex(80, '2026-01-02') } }, mergedWorkouts: mergedWorkouts })
+    expect(r.x).toEqual({ w: 95, d: '2026-01-02' }) // 95 (topW) > 80 → upgraded; date from that session
+    const r2 = mergeExWeights({ local: { exWeights: {} }, server: { exWeights: {} }, mergedWorkouts })
+    expect(r2).toEqual({})
+  })
+  it('a deleted custom exercise takes its weight entry away; an unknown non-custom id stays', () => {
+    const local = { exWeights: { gone: ex(50, '2026-01-01'), keeper: ex(60, '2026-01-01'), '0001': ex(40, '2026-01-01') }, customEx: [{ id: 'keeper' }] }
+    const server = { exWeights: { gone: ex(50, '2026-01-01'), keeper: ex(60, '2026-01-01'), '0001': ex(40, '2026-01-01') }, customEx: [{ id: 'keeper' }] }
+    const baseCustomIds = ['gone', 'keeper', '0001']
+    const r = mergeExWeights({ local, server, mergedWorkouts: [], baseCustomIds: ['gone', 'keeper'] })
+    expect('gone' in r).toBe(false)       // custom deleted on one side → weight dropped
+    expect('keeper' in r).toBe(true)
+    expect('0001' in r).toBe(true)        // unknown non-custom id is never removed
+  })
+  it('idempotent and commutative; inputs are not mutated', () => {
+    const l = { exWeights: { x: ex(80, '2026-01-01'), y: ex(50, '2026-01-03') } }
+    const sv = { exWeights: { x: ex(82, '2026-01-02') } }
+    const lCopy = JSON.parse(JSON.stringify(l)), sCopy = JSON.parse(JSON.stringify(sv))
+    const ab = mergeExWeights({ local: l, server: sv, mergedWorkouts: [] })
+    const ba = mergeExWeights({ local: sv, server: l, mergedWorkouts: [] })
+    expect(ab).toEqual(ba)
+    expect(mergeExWeights({ local: { exWeights: ab }, server: sv, mergedWorkouts: [] })).toEqual(ab)
+    expect(l).toEqual(lCopy)
+    expect(sv).toEqual(sCopy)
   })
 })
 
