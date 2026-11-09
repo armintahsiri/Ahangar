@@ -697,6 +697,7 @@ const routes = {
       warnThrottle(ip);
       return json(res, 429, { error: 'too many uploads — try again later' });
     }
+    bucketHit(upKey, REGISTER_WINDOW);   // every accepted-but-unthrottled attempt consumes budget
     const ctype = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
     if (ctype !== 'image/gif' && ctype !== 'video/mp4') return json(res, 415, { error: 'send the raw file with Content-Type image/gif or video/mp4' });
     let buf;

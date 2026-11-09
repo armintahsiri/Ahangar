@@ -248,7 +248,13 @@ export function mergeStates({ baseHashes, baseSnap, local, server }) {
     const hL = k in ln ? hashKey(ln[k]) : undefined
     const hS = k in sn ? hashKey(sn[k]) : undefined
     const lc = hL !== hB, sc = hS !== hB
-    if (!lc || !sc) continue
+    if (!lc && !sc) continue                                  // untouched → keep local
+    if (!sc) continue                                         // only local changed → keep local
+    if (!lc) {                                                // only server changed → take server (incl. deletion)
+      if (k in sn) merged[k] = sn[k]
+      else delete merged[k]
+      continue
+    }
     if (k === 'exWeights') merged.exWeights = mergeExWeights({ local: ln, server: sn, mergedWorkouts: merged.workouts, baseCustomIds: baseSnap?.customIds })
     else if (k === 'dayPlan') {
       // without the base snapshot a per-date deletion is indistinguishable from absence —

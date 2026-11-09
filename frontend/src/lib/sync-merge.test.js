@@ -247,6 +247,28 @@ describe('mergeDayPlan per-date (phase 7b)', () => {
     expect(l).toEqual({ '2026-11-02': 'r2' })
     expect(s).toEqual({ '2026-11-01': 'r1' })
   })
+  it('routing: a server-only change to exWeights/dayPlan is applied, not dropped', () => {
+    const baseHashes = { unit: hashKey('kg'), exWeights: hashKey({}), dayPlan: hashKey({}) }
+    const baseSnap = { dayPlan: {}, customIds: [] }
+    // only the server changed → server wins (the old code silently kept local)
+    const m1 = mergeStates({ baseHashes, baseSnap, local: { unit: 'kg' }, server: { unit: 'kg', exWeights: { x: { w: 90, d: '2026-01-01' } }, dayPlan: { '2026-11-01': 'r1' } } })
+    expect(m1.conflicts).toEqual([])
+    expect(m1.merged.exWeights).toEqual({ x: { w: 90, d: '2026-01-01' } })
+    expect(m1.merged.dayPlan).toEqual({ '2026-11-01': 'r1' })
+    // only local changed → local stays
+    const m2 = mergeStates({ baseHashes, baseSnap, local: { unit: 'kg', exWeights: { x: { w: 70, d: '2026-01-02' } }, dayPlan: { '2026-11-02': 'r2' } }, server: { unit: 'kg' } })
+    expect(m2.conflicts).toEqual([])
+    expect(m2.merged.exWeights).toEqual({ x: { w: 70, d: '2026-01-02' } })
+    expect(m2.merged.dayPlan).toEqual({ '2026-11-02': 'r2' })
+    // server deletion of the key while local untouched → key removed
+    const base3 = { unit: 'kg', exWeights: { x: { w: 70, d: '2026-01-02' } }, dayPlan: { '2026-11-02': 'r2' } }
+    const hashes3 = { unit: hashKey('kg'), exWeights: hashKey(base3.exWeights), dayPlan: hashKey(base3.dayPlan) }
+    const m3 = mergeStates({ baseHashes: hashes3, baseSnap: { dayPlan: base3.dayPlan, customIds: [] }, local: base3, server: { unit: 'kg' } })
+    expect(m3.conflicts).toEqual([])
+    expect('exWeights' in m3.merged).toBe(false)
+    expect('dayPlan' in m3.merged).toBe(false)
+  })
+
   it('through mergeStates: both sides changed dayPlan with a snapshot → merged, not conflicted', () => {
     const baseHashes = { unit: hashKey('kg'), dayPlan: hashKey(B) }
     const m = mergeStates({ baseHashes, baseSnap: { dayPlan: B, customIds: [] }, local: { unit: 'kg', dayPlan: { '2026-11-02': 'r2' } }, server: { unit: 'kg', dayPlan: { '2026-11-03': 'r3' } } })

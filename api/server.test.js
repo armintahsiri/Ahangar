@@ -677,6 +677,37 @@ test('media.release: freeing the quota lets a new upload through', async () => {
   }
 })
 
+test('media.upload throttle: per-IP cap engages (bucketHit was wired)', { timeout: 30000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-medialimit-'))
+  seedDb(dir)
+  const child = spawn(process.execPath, [path.join(HERE, 'server.js')], {
+    cwd: HERE,
+    env: { ...process.env, DATA_DIR: dir, PORT: '0', MEDIA_UPLOAD_IP_MAX: '3', MEDIA_MAX_FILES: '100' },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  try {
+    const port = await new Promise((resolve, reject) => {
+      let buf = ''
+      child.stdout.on('data', d => { buf += d; const m = buf.match(/gym-api on :(\d+)/); if (m) resolve(+m[1]) })
+      child.stderr.on('data', d => { buf += d })
+      child.on('exit', code => reject(new Error(`server exited early: ${code}\n${buf}`)))
+    })
+    const B = `http://127.0.0.1:${port}`
+    const loginRes = await fetch(B + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '+989120000001', password: 'adminpass123' }) })
+    const at = (loginRes.headers.get('set-cookie') || '').match(/gymsid=([^;]*)/)?.[1]
+    assert.ok(at, 'admin login in child failed')
+    const up = n => fetch(B + '/api/media', { method: 'POST', headers: { 'Content-Type': 'image/gif', cookie: `gymsid=${at}` }, body: Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(8, n)]) })
+      .then(r => r.status)
+    assert.equal(await up(1), 200)
+    assert.equal(await up(2), 200)
+    assert.equal(await up(3), 200)
+    assert.equal(await up(4), 429)   // the 4th distinct upload hits the per-IP cap
+  } finally {
+    child.kill('SIGTERM')
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* fine */ }
+  }
+})
+
 /* ---------- media tooling: gc-media.mjs and inline-media.mjs ---------- */
 test('media.gc coverage: coach-only refs, disabled-user state, orphans and missing files', { timeout: 30000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gym-api-gc-'))
