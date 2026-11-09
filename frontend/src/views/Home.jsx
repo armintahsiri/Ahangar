@@ -60,8 +60,8 @@ export default function Home() {
   const wThisWeek = S.workouts.filter(w => w.d >= currentWeekStartISO && w.d <= todayISOValue).length
   const plannedPerWeek = Object.keys(S.week).filter(k => S.week[k]).length
   const weekSummary = plannedPerWeek
-    ? t('This week: {0} of {1} planned workouts', wThisWeek, plannedPerWeek)
-    : t('This week: {0} workouts', wThisWeek)
+    ? t('This week: {0} of {1} planned workouts', fmtNum(wThisWeek), fmtNum(plannedPerWeek))
+    : t('This week: {0} workouts', fmtNum(wThisWeek))
   const bwPoints = S.bodyweight.slice(-30).map(b => ({ t: b.t || new Date(b.d).getTime(), y: b.w, d: b.d }))
 
   // The selected day drives both the session summary and its muscle map.

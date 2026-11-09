@@ -18,7 +18,7 @@ export function fmtDate(iso, long) {
 }
 export function fmtDur(ms) {
   const m = Math.floor(ms / 60000)
-  return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + ' min'
+  return faGlyphs(m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + ' min')
 }
 // Imported history has no clock — an unknown duration is left out rather than shown as "0 min".
 export const durPart = ms => (ms >= 60000 ? [fmtDur(ms)] : [])
@@ -54,7 +54,7 @@ export const fmtVol = (v, unit) => fmtNum(v) + ' ' + unit
 // prose keeps flowing around it the way it always has.
 export const ltrNum = s => '\u2066' + s + '\u2069'
 // Plural forms are not automatic when the English string is the key.
-export const exCount = n => t(n === 1 ? '{0} exercise' : '{0} exercises', n)
+export const exCount = n => t(n === 1 ? '{0} exercise' : '{0} exercises', fmtNum(n))
 
 export function weekKey(d) {
   const dt = new Date(d + 'T12:00:00')
