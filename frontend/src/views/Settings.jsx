@@ -139,6 +139,10 @@ export default function Settings() {
           options={[{ value: 'kg', label: 'kg' }, { value: 'lb', label: 'lb' }]}
           value={S.unit} onChange={v => update(s => { s.unit = v })} />
       </Row>
+      {S.lang === 'fa' && <Row icon="list" iconTint="var(--indigo)" title={t('Persian digits')}
+        subtitle={t('Show all numbers in Persian script.')}>
+        <Switch checked={S.digits === 'fa'} onChange={v => update(s => { s.digits = v ? 'fa' : 'latn' })} />
+      </Row>}
     </Section>
 
     {/* ---------- during a workout ---------- */}

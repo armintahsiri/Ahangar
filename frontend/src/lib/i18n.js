@@ -22,6 +22,7 @@ const localePacks = import.meta.glob('../locales/*.js')
 const instrPacks = import.meta.glob('../instr/*.js')
 
 let lang = 'en'
+let digits = 'latn'   // 'latn' | 'fa' — the Persian-digits display preference (state key `digits`)
 let dict = {}
 let instr = null            // { exId: [steps] } for the current language, null = English
 let version = 0
@@ -30,6 +31,15 @@ const notify = () => { version++; subs.forEach(f => f()) }
 
 export const getLang = () => lang
 export const dateLocale = () => DATE_LOCALES[lang] || 'en-GB'
+
+// The Persian-digits preference lives next to the language (same notify cycle, same Shell
+// effect pattern). The calendar never changes with it — format.js only re-glyphs the digits
+// of whatever the Latin-pinned locales already produced, so the old iOS Intl quirks stay out.
+export const getDigits = () => digits
+export function setDigits(d) {
+  const v = d === 'fa' ? 'fa' : 'latn'
+  if (v !== digits) { digits = v; notify() }
+}
 
 // Translate a source string; {0},{1}… are replaced with args (also on the English fallback).
 export function t(s, ...args) {

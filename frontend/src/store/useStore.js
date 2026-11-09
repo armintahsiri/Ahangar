@@ -15,6 +15,7 @@ const BASE_KEY = 'gym_sync_base'        // {rev, hashes} — the last state both
 const DISCARD_KEY = 'gym_conflict_backup' // the version set aside at the last conflict resolution
 export const DEF = {
   unit: 'kg', restSec: 90, sound: true, keepAwake: true, lang: 'en',
+  digits: 'latn',   // 'latn' | 'fa' — Persian-digits display preference (visible in fa only)
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
   bodyweight: [], routines: [], week: {}, dayPlan: {},
   exWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',

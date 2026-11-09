@@ -1,5 +1,5 @@
 // Formatting + date helpers (ported from the vanilla app, unit taken from the store where needed).
-import { dateLocale, t } from './i18n.js'
+import { dateLocale, t, getDigits, getLang } from './i18n.js'
 export const todayISO = () => {
   const d = new Date()
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
@@ -14,7 +14,8 @@ export const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'Jun
 
 export function fmtDate(iso, long) {
   const d = new Date(iso + 'T12:00:00')
-  return d.toLocaleDateString(dateLocale(), long ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' })
+  const s = d.toLocaleDateString(dateLocale(), long ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' })
+  return persian() ? faGlyphs(s) : s
 }
 export function fmtDur(ms) {
   const m = Math.floor(ms / 60000)
@@ -22,11 +23,19 @@ export function fmtDur(ms) {
 }
 // Imported history has no clock — an unknown duration is left out rather than shown as "0 min".
 export const durPart = ms => (ms >= 60000 ? [fmtDur(ms)] : [])
-// Numbers are Latin digits in every language — both on purpose: they are data, and mixed
-// prose (Persian sentence, Latin figure) is how gym apps read. The old per-language locale
-// rendered Persian digits + ٫ decimal, which iOS Safari then compounded by re-shaping whole
-// tile values; a fixed en-US keeps one digit style everywhere (decimal point, comma group).
-export const fmtNum = n => (Math.round(n * 10) / 10).toLocaleString('en-US')
+// Numbers default to Latin digits in every language — they are data, and mixed prose
+// (Persian sentence, Latin figure) is how gym apps read. The old per-language locale
+// rendered Persian digits + ٫ decimal via Intl, which iOS Safari compounded by re-shaping
+// whole tile values. The opt-in Persian-digits preference therefore converts the stable
+// en-US output glyph-by-glyph here — the one central conversion point — instead of trusting
+// Intl digit shaping; the calendar and grouping of dates never change, only the glyphs.
+const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
+const faGlyphs = s => String(s)
+  .replace(/[0-9]/g, d => FA_DIGITS[+d])
+  .replace(/\./g, '٫')   // decimal separator
+  .replace(/,/g, '٬')    // thousands separator
+const persian = () => getDigits() === 'fa' && getLang() === 'fa'
+export const fmtNum = n => { const s = (Math.round(n * 10) / 10).toLocaleString('en-US'); return persian() ? faGlyphs(s) : s }
 // Volume stays in the profile's unit throughout: the old shorthand turned anything over
 // 10 000 into "t", which is wrong for a pound profile and made one list mix "18.8t" with
 // "7'535 kg" — two numbers you can't compare at a glance.

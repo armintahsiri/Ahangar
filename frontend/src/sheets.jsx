@@ -21,6 +21,7 @@ import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 import { addTombstone, removeTombstone, normalizeState, topLevelHashes, resolveMerge } from './lib/sync-merge.js'
+import { latinNum } from './lib/fa-text.js'
 import { mediaSrc, mediaRefOf, uploadMedia } from './lib/media.js'
 import { exName, exEnglishName, matchEx } from './lib/exnames.js'
 import { withCoachProgram } from './store/useStore.js'
@@ -90,7 +91,7 @@ function WeightInput({ value, setValue, unit }) {
   return <>
     <div className="bwstep">
       <button className="bw-pm" onClick={() => onSlide(value - 0.1)} aria-label="minus 0.1"><Icon name="minus" /></button>
-      <div className="bw-read">{fmtNum(value)}<span className="u"> {unit}</span></div>
+      <div className="bw-read">{latinNum(value)}<span className="u"> {unit}</span></div>
       <button className="bw-pm" onClick={() => onSlide(value + 0.1)} aria-label="plus 0.1"><Icon name="plus" /></button>
     </div>
     <div className="chips" style={{ justifyContent: 'center', margin: '8px 0' }}>

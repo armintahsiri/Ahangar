@@ -4,7 +4,7 @@ import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { bindUI } from './components/ui.jsx'
 import { ACCENTS } from './lib/format.js'
-import { directionFor, setLang, useLang, t } from './lib/i18n.js'
+import { directionFor, setLang, setDigits, useLang, t } from './lib/i18n.js'
 import { DEMO } from './lib/demo.js'
 import { MOBILE } from './lib/mobile.js'
 import { setNav } from './lib/nav.js'
@@ -50,6 +50,7 @@ function Shell() {
   useEffect(() => { applyPrefs(S.theme, S.accent) }, [S.theme, S.accent])
   useEffect(() => { document.title = clubName || 'openGym' }, [clubName])
   useEffect(() => { setLang(S.lang || 'en') }, [S.lang])
+  useEffect(() => { setDigits(S.digits) }, [S.digits])   // Persian-digits display preference
   useEffect(() => {
     const language = S.lang || 'en'
     document.documentElement.lang = language

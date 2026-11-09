@@ -168,6 +168,24 @@ describe('mergeStates — key classes and epoch', () => {
   })
 })
 
+describe('digits state key (phase 6)', () => {
+  it('merges like any other top-level key', () => {
+    const baseHashes = { unit: hashKey('kg') }
+    const local = { unit: 'kg', digits: 'fa' }
+    const server = { unit: 'lb' }
+    const { conflicts, merged } = mergeStates({ baseHashes, local, server })
+    expect(conflicts).toEqual([])
+    expect(merged.digits).toBe('fa')
+    expect(merged.unit).toBe('lb')
+  })
+  it('absent on both sides of an old state → no key, old behaviour', () => {
+    const baseHashes = { unit: hashKey('kg') }
+    const { merged, conflicts } = mergeStates({ baseHashes, local: { unit: 'kg' }, server: { unit: 'lb' } })
+    expect(conflicts).toEqual([])
+    expect('digits' in merged).toBe(false)
+  })
+})
+
 describe('resolveMerge', () => {
   it("'server' takes the server's values for the conflicted keys only", () => {
     const server = { unit: 'lb', targetW: 82, restSec: 120 }
