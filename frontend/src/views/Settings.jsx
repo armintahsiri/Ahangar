@@ -137,7 +137,19 @@ export default function Settings() {
       <Row icon="scale" iconTint="var(--teal)" title={t('Weight unit')}>
         <Segmented className="seg-inline"
           options={[{ value: 'kg', label: 'kg' }, { value: 'lb', label: 'lb' }]}
-          value={S.unit} onChange={v => update(s => { s.unit = v })} />
+          value={S.unit} onChange={v => {
+            if (v === S.unit) return
+            // with any history, the switch is label-only and that is exactly what it says:
+            // old numbers stay as they were and now read as the new unit
+            const hasHistory = (S.workouts || []).length > 0 || (S.bodyweight || []).length > 0
+            if (!hasHistory) { update(s => { s.unit = v }); return }
+            confirmSheet({
+              title: t('Change weight unit?'),
+              message: t('Existing numbers are not converted — only the label changes. If you switch, your history stays in the old numbers and is shown as {0}, mixing charts and records.', v),
+              confirmText: t('Change unit'),
+              onConfirm: () => update(s => { s.unit = v }),
+            })
+          }} />
       </Row>
       {S.lang === 'fa' && <Row icon="list" iconTint="var(--indigo)" title={t('Persian digits')}
         subtitle={t('Show all numbers in Persian script.')}>

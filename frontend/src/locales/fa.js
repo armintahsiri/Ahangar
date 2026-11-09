@@ -513,6 +513,11 @@ export default {
   "Web Push on iOS needs iOS 16.4 or later": "اعلان Web Push در iOS به نسخه‌ی 16.4 به بعد نیاز دارد",
   "and only works once openGym is installed to the Home Screen — in a regular Safari tab the toggle will not appear.": "و فقط وقتی کار می‌کند که openGym روی Home Screen نصب شده باشد — در تب معمولی Safari سوییچ اعلان‌ها ظاهر نمی‌شود.",
 
+  // --- هشدار واحد ---
+  "Change weight unit?": "واحد وزن عوض شود؟",
+  "Existing numbers are not converted — only the label changes. If you switch, your history stays in the old numbers and is shown as {0}, mixing charts and records.": "اعداد قبلی تبدیل نمی‌شوند؛ فقط برچسب عوض می‌شود. اگر واحد را عوض کنی، تاریخچه‌ات با اعداد قبلی می‌ماند و به‌عنوان {0} نمایش داده می‌شود؛ نمودارها و رکوردها قاطی می‌شوند.",
+  "Change unit": "تغییر بده",
+
   // --- ارقام فارسی ---
   "Persian digits": "ارقام فارسی",
   "Show all numbers in Persian script.": "نمایش همه‌ی اعداد با ارقام فارسی.",

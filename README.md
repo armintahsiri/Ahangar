@@ -222,6 +222,8 @@ exercise-media server together. Local API data is stored in `./data`.
 5. Open **Stats** and **History** to review workout volume, records, estimated 1RM, body weight, activity, and muscle balance.
 6. Open **Settings → Data** to export a JSON backup. Administrators should also back up the server's `./data` folder.
 
+Changing the weight unit (Settings → General) only relabels numbers — existing history is **not converted**, so switching units on a profile with history mixes charts and records.
+
 ### Install the website on a phone or desktop
 
 openGym is a PWA. Open the deployed HTTPS website, then:
