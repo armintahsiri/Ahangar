@@ -10,6 +10,8 @@ const pack = (await import(new URL('../frontend/src/locales/exnames.fa.js', impo
 const { EXDB } = await import(new URL('../frontend/src/lib/exercises-data.js', import.meta.url).href)
 const EXIDX = new Map(EXDB.map(e => [e.id, e]))
 
+// these mappings are best-effort stand-ins, not exact matches — flag them in the review sheet
+const REVIEW_IDS = new Set(['0203', '1409'])
 const rows = Object.entries(pack)
   .map(([id, e]) => ({ id, ...e, bp: EXIDX.get(id)?.bp || '?', en: EXIDX.get(id)?.n || '?' }))
   .sort((a, b) => a.bp.localeCompare(b.bp) || a.en.localeCompare(b.en))
@@ -25,7 +27,8 @@ let out = `# Persian exercise names — review sheet
 |---|---|---|---|---|
 `
 for (const r of rows) {
-  out += `| ${r.id} | ${esc(r.en)} | ${esc(r.n)} | ${esc((r.a || []).join('، ')) || '—'} | ${r.bp} |\n`
+  const flag = REVIEW_IDS.has(r.id) ? ' ⚠ نیاز به تأیید محتوایی — GIF را ببینید' : ''
+  out += `| ${r.id} | ${esc(r.en)} | ${esc(r.n)}${flag} | ${esc((r.a || []).join('، ')) || '—'} | ${r.bp} |\n`
 }
 fs.writeFileSync(path.join(root, 'docs', 'exnames-review.md'), out)
 console.log(`docs/exnames-review.md written — ${rows.length} rows`)
