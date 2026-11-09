@@ -171,6 +171,24 @@ export function resolveMerge(merged, server, conflicts, choice) {
   return out
 }
 
+/* ---------- base snapshot (dayPlan + custom ids) ---------- */
+// The base normally carries { rev, hashes } only. Attaching a small snapshot of the accepted
+// state lets the custom per-key merges (dayPlan, exWeights) tell a deletion from an absence.
+// An oversized or failing snapshot is silently dropped — those merges then fall back to
+// today's behaviour (whole-key conflict). Nothing here throws on a full localStorage.
+export const BASE_SNAP_MAX = 50 * 1024
+export function withSnap(base, state) {
+  if (!base) return base
+  try {
+    const snap = {
+      dayPlan: state?.dayPlan || {},
+      customIds: (state?.customEx || []).map(c => c && c.id).filter(Boolean)
+    }
+    if (JSON.stringify(snap).length > BASE_SNAP_MAX) return base
+    return { ...base, snap }
+  } catch { return base }
+}
+
 /* ---------- push controller: send → on 409 merge → retry ---------- */
 export const PUSH_MAX_RETRIES = 3
 // deps: getBase() → {rev, hashes} | null · getLocal() → state · applyLocal(state)
@@ -185,7 +203,7 @@ export async function pushWithMerge(deps, retries = 0) {
     // base pinning: normalize(local) is exactly how the server's stored copy normalizes,
     // so the next three-way compares like-for-like. A legacy server without rev keeps
     // rev null → no baseRev is ever sent → old behavior.
-    deps.setBase({ rev: resp.rev ?? null, hashes: topLevelHashes(normalizeState(deps.getLocal())) })
+    deps.setBase({ rev: resp.rev ?? null, hashes: topLevelHashes(normalizeState(deps.getLocal())) }, deps.getLocal())
     return { ok: true, rev: resp.rev ?? null }
   }
   const m = mergeStates({ baseHashes: base?.hashes || null, local: deps.getLocal(), server: resp.state })
@@ -196,7 +214,8 @@ export async function pushWithMerge(deps, retries = 0) {
   // the server view rides along so the caller can re-inject coach-owned content (it is
   // normalized out of merged — see normalizeState)
   deps.applyLocal(m.merged, resp.state)
-  deps.setBase({ rev: resp.rev, hashes: topLevelHashes(normalizeState(m.merged)) })
+  // the merged state rides along so the caller can snapshot it into the base
+  deps.setBase({ rev: resp.rev, hashes: topLevelHashes(normalizeState(m.merged)) }, m.merged)
   return pushWithMerge(deps, retries + 1)
 }
 

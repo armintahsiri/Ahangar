@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   hashKey, topLevelHashes, normalizeState, mergeStates, resolveMerge,
-  pushWithMerge, addTombstone, removeTombstone, withNewEpoch, PUSH_MAX_RETRIES
+  pushWithMerge, addTombstone, removeTombstone, withNewEpoch, PUSH_MAX_RETRIES,
+  withSnap, BASE_SNAP_MAX
 } from './sync-merge.js'
 
 // base hashes for a state, the way the store records them after a successful sync
@@ -165,6 +166,42 @@ describe('mergeStates — key classes and epoch', () => {
     })
     expect(epochConflict).toBe(false)
     expect(conflicts).toEqual([])
+  })
+})
+
+describe('withSnap — base snapshot (phase 7b)', () => {
+  it('attaches dayPlan and custom ids from the accepted state', () => {
+    const st = { dayPlan: { '2026-11-09': 'r1' }, customEx: [{ id: 'c1' }, { id: null }] }
+    const b = withSnap({ rev: 4, hashes: {} }, st)
+    expect(b.snap).toEqual({ dayPlan: { '2026-11-09': 'r1' }, customIds: ['c1'] })
+    expect(b.rev).toBe(4)
+  })
+  it('drops the snapshot when it would exceed the size cap', () => {
+    const big = { dayPlan: {}, customEx: [] }
+    for (let i = 0; i < 4000; i++) big.dayPlan['2026-01-' + String(1 + (i % 28)).padStart(2, '0') + '-' + i] = 'r' + i
+    const b = withSnap({ rev: 1, hashes: {} }, big)
+    expect(b.snap).toBeUndefined()
+    expect(b.rev).toBe(1)
+  })
+  it('a null base stays null and an empty state yields an empty snap', () => {
+    expect(withSnap(null, { dayPlan: {} })).toBeNull()
+    const b = withSnap({ rev: 1, hashes: {} }, {})
+    expect(b.snap).toEqual({ dayPlan: {}, customIds: [] })
+  })
+  it('the controller hands the accepted state to setBase for snapshotting', async () => {
+    let seenState = null
+    const deps = {
+      getBase: () => null,
+      getLocal: () => ({ unit: 'kg' }),
+      applyLocal: () => {},
+      setBase: (b, st) => { seenState = st },
+      send: async () => ({ ok: true, rev: 1 })
+    }
+    await (await import('./sync-merge.js')).pushWithMerge(deps)
+    expect(seenState).toEqual({ unit: 'kg' })
+  })
+  it('BASE_SNAP_MAX is 50 KB', () => {
+    expect(BASE_SNAP_MAX).toBe(50 * 1024)
   })
 })
 

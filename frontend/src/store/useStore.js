@@ -6,7 +6,7 @@ import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
 import { nextSync } from '../lib/sync-status.js'
 import {
-  pushWithMerge, mergeStates, normalizeState, topLevelHashes, withNewEpoch, resolveMerge
+  pushWithMerge, mergeStates, normalizeState, topLevelHashes, withNewEpoch, resolveMerge, withSnap
 } from '../lib/sync-merge.js'
 import { migrateStateMedia, uploadMedia, mediaHashesOf } from '../lib/media.js'
 
@@ -38,11 +38,12 @@ function loadState() {
 const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
 
 // The sync base: what the server held at the last successful push/pull. Kept out of the
-// synced state on purpose — it is this device's merge ancestry, never user data.
+// synced state on purpose — it is this device's merge ancestry, never user data. The small
+// snapshot (dayPlan + custom ids) lets the phase-7b per-key merges tell deletion from absence.
 const readSyncBase = () => { try { return JSON.parse(localStorage.getItem(BASE_KEY)) || null } catch { return null } }
 const writeSyncBase = b => { try { localStorage.setItem(BASE_KEY, JSON.stringify(b)) } catch { /* quota — merge falls back to LWW */ } }
 // The server view (GET shape) normalized — exactly how its stored copy normalizes.
-const pinBase = (rev, state) => writeSyncBase({ rev: rev ?? null, hashes: topLevelHashes(normalizeState(state)) })
+const pinBase = (rev, state) => writeSyncBase(withSnap({ rev: rev ?? null, hashes: topLevelHashes(normalizeState(state)) }, state))
 // The version set aside the last time a conflict was resolved (Settings can restore it).
 export const readDiscardedBackup = () => { try { return JSON.parse(localStorage.getItem(DISCARD_KEY)) || null } catch { return null } }
 
@@ -200,7 +201,8 @@ export const useStore = create((set, get) => {
           if (a) next.active = a
           persist(next, false)
         },
-        setBase: writeSyncBase,
+        // withSnap attaches the small dayPlan/customIds snapshot from the accepted state
+        setBase: (b, st) => writeSyncBase(withSnap(b, st)),
         send: async (baseRev, state) => {
           const body = { state }
           if (baseRev != null) body.baseRev = baseRev
@@ -327,7 +329,7 @@ export const useStore = create((set, get) => {
       }
       const a = get().S.active
       if (a) winner.active = a
-      writeSyncBase({ rev: info.serverRev ?? null, hashes: topLevelHashes(normalizeState(winner)) })
+      pinBase(info.serverRev ?? null, winner)
       persist(clone(winner), false)
       set({ syncConflict: null })
       get().pushState()
@@ -339,7 +341,7 @@ export const useStore = create((set, get) => {
       const a = get().S.active
       const next = clone(backup.state)
       if (a) next.active = a
-      writeSyncBase({ rev: readSyncBase()?.rev ?? null, hashes: topLevelHashes(normalizeState(next)) })
+      pinBase(readSyncBase()?.rev ?? null, next)
       persist(next, false)
       try { localStorage.removeItem(DISCARD_KEY) } catch { /* fine */ }
       get().pushState()
