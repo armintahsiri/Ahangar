@@ -1,11 +1,29 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { setDigits, getDigits, dateLocale, setLang } from './i18n.js'
-import { fmtNum, fmtDate, ltrNum } from './format.js'
+import { fmtNum, fmtDate, ltrNum, faGlyphs } from './format.js'
 
 afterEach(() => setDigits('latn'))
 
+describe('faGlyphs — central converter for UI off the fmtNum path', () => {
+  afterEach(() => setDigits('latn'))
+  it('converts digits and separators when the preference is on', async () => {
+    await setLang('fa')
+    setDigits('fa')
+    expect(faGlyphs('1,234.5')).toBe('۱٬۲۳۴٫۵')
+    expect(faGlyphs(19)).toBe('۱۹')          // numbers accepted (calendar day cells)
+    expect(faGlyphs('2026-11-09')).toBe('۲۰۲۶-۱۱-۰۹')
+  })
+  it('passes through unchanged when off', async () => {
+    await setLang('fa')
+    setDigits('latn')            // self-contained: earlier tests may have enabled it
+    expect(faGlyphs('1,234.5')).toBe('1,234.5')
+  })
+})
+
 describe('Persian digits option', () => {
-  it('defaults to Latin — regression on the pre-phase-6 behaviour', () => {
+  it('defaults to Latin — regression on the pre-phase-6 behaviour', async () => {
+    await setLang('en')          // self-contained: earlier tests may have switched language
+    setDigits('latn')
     expect(getDigits()).toBe('latn')
     expect(fmtNum(1234.5)).toBe('1,234.5')
     expect(dateLocale()).toBe('en-GB')

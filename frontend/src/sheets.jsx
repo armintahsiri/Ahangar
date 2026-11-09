@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { EXDB, EXIDX, BODYPARTS, isCardio, isBodyweightEq, allExercises, equipmentOf } from './lib/exercises.js'
-import { fmtDate, fmtNum, fmtVol, fmtDur, durPart, todayISO, uid, exCount, DAYN, MONTHS_LONG, ACCENTS } from './lib/format.js'
+import { fmtDate, fmtNum, fmtVol, fmtDur, durPart, todayISO, uid, exCount, DAYN, MONTHS_LONG, ACCENTS, faGlyphs } from './lib/format.js'
 import { lastEntryFor, bestWeightFor, buildSets, effectiveRoutineId, workoutVolume, setsDone, setsDoneActive, lastBW, supersetUnits, unitOf, setLabel, defaultConfig, cleanupSg, modeOf, effortOf, isBw, isPerSide, sideReps } from './lib/history.js'
 import { beep, vibrate } from './lib/sound.js'
 import { t, instrFor, getLang, INSTR_LANGS } from './lib/i18n.js'
@@ -881,12 +881,12 @@ function Calendar({ start, close }) {
       if (!ws) { close(); dayOverrideSheet(iso); return }
       if (ws.length === 1) { close(); workoutDetailSheet(ws[0]); return }
       close(); ui().openSheet(c2 => <><h3>{fmtDate(iso, true)}</h3><div className="list">{ws.map(w => <WorkoutRow key={w.id} w={w} onClick={() => { c2(); workoutDetailSheet(w) }} />)}</div></>)
-    }}><span>{d}</span><i className={dotCls} /></button>)
+    }}><span>{faGlyphs(d)}</span><i className={dotCls} /></button>)
   }
   return <>
     <div className="row between" style={{ marginBottom: 2 }}>
       <button className="iconbtn" onClick={() => { const d = new Date(cur); d.setDate(d.getDate() - 35); setCur(monthStart(d)) }} aria-label="Previous month"><Icon name="chevronLeft" /></button>
-      <h3 style={{ margin: 0 }}>{shown.month} {shown.year}</h3>
+      <h3 style={{ margin: 0 }}>{shown.month} {faGlyphs(shown.year)}</h3>
       <button className="iconbtn" onClick={() => { const d = new Date(cur); d.setDate(d.getDate() + 35); setCur(monthStart(d)) }} aria-label="Next month"><Icon name="chevronRight" /></button>
     </div>
     <div className="cal-grid">{(persian ? ['Sa', 'Su', 'Mo', 'Tu', 'We', 'Th', 'Fr'] : ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']).map(l => <div key={l} className="cal-h">{t(l)}</div>)}{cells}</div>

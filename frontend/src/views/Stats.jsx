@@ -267,9 +267,9 @@ export default function Stats() {
     <SummaryCard S={S} />
 
     <div className="tiles">
-      <div className="tile"><div className="l"><Icon name="dumbbell" />{t('Workouts')}</div><div className="v">{S.workouts.length}</div></div>
-      <div className="tile"><div className="l"><Icon name="calendar" />{t('This month')}</div><div className="v">{monthW}</div></div>
-      <div className="tile"><div className="l"><Icon name="flame" />{t('Week streak')}</div><div className="v">{streakWeeks(S)}</div></div>
+      <div className="tile"><div className="l"><Icon name="dumbbell" />{t('Workouts')}</div><div className="v">{fmtNum(S.workouts.length)}</div></div>
+      <div className="tile"><div className="l"><Icon name="calendar" />{t('This month')}</div><div className="v">{fmtNum(monthW)}</div></div>
+      <div className="tile"><div className="l"><Icon name="flame" />{t('Week streak')}</div><div className="v">{fmtNum(streakWeeks(S))}</div></div>
       <div className="tile"><div className="l"><Icon name="scale" />{t('Weight 30d')}</div><div className="v" style={{ fontSize: 22, color: bwDelta30 === null ? 'inherit' : bwDeltaColor(bwDelta30, (lastBW(S) || {}).w || 0) }}>{bwDelta30 === null ? '—' : ltrNum((bwDelta30 > 0 ? '+' : '') + fmtNum(bwDelta30)) + ' ' + S.unit}</div></div>
     </div>
 

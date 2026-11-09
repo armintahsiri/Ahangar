@@ -14,8 +14,7 @@ export const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'Jun
 
 export function fmtDate(iso, long) {
   const d = new Date(iso + 'T12:00:00')
-  const s = d.toLocaleDateString(dateLocale(), long ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' })
-  return persian() ? faGlyphs(s) : s
+  return faGlyphs(d.toLocaleDateString(dateLocale(), long ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' }))
 }
 export function fmtDur(ms) {
   const m = Math.floor(ms / 60000)
@@ -30,12 +29,20 @@ export const durPart = ms => (ms >= 60000 ? [fmtDur(ms)] : [])
 // en-US output glyph-by-glyph here — the one central conversion point — instead of trusting
 // Intl digit shaping; the calendar and grouping of dates never change, only the glyphs.
 const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
-const faGlyphs = s => String(s)
-  .replace(/[0-9]/g, d => FA_DIGITS[+d])
-  .replace(/\./g, '٫')   // decimal separator
-  .replace(/,/g, '٬')    // thousands separator
+// exported for numeric UI that bypasses fmtNum (calendar day cells, week-strip day numbers):
+// same central conversion, never a scattered second implementation
 const persian = () => getDigits() === 'fa' && getLang() === 'fa'
-export const fmtNum = n => { const s = (Math.round(n * 10) / 10).toLocaleString('en-US'); return persian() ? faGlyphs(s) : s }
+// central converter, gated by the preference — call sites (fmtNum/fmtDate and the few UI
+// spots that bypass fmtNum, like the calendar) never need their own digit logic
+export const faGlyphs = s => {
+  const out = String(s)
+  if (!persian()) return out
+  return out
+    .replace(/[0-9]/g, d => FA_DIGITS[+d])
+    .replace(/\./g, '٫')   // decimal separator
+    .replace(/,/g, '٬')    // thousands separator
+}
+export const fmtNum = n => faGlyphs((Math.round(n * 10) / 10).toLocaleString('en-US'))
 // Volume stays in the profile's unit throughout: the old shorthand turned anything over
 // 10 000 into "t", which is wrong for a pound profile and made one list mix "18.8t" with
 // "7'535 kg" — two numbers you can't compare at a glance.

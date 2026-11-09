@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { effectiveRoutine, effectiveRoutineId, streakWeeks, lastBW, setsDoneActive } from '../lib/history.js'
-import { fmtNum, fmtDate, todayISO, isoOf, DAYS } from '../lib/format.js'
+import { fmtNum, fmtDate, todayISO, isoOf, DAYS, faGlyphs } from '../lib/format.js'
 import { t, dateLocale } from '../lib/i18n.js'
 import { bwSheet, goalSheet, dayOverrideSheet, calendarSheet, startFlow, loadStarterPlan, bwDeltaColor } from '../sheets.jsx'
 import LineChart from '../components/LineChart.jsx'
@@ -48,10 +48,10 @@ export default function Home() {
     strip.push(<button type="button" key={i} aria-pressed={selectedISO === iso}
       className={'wday' + (iso === todayISO() ? ' today' : '') + (selectedISO === iso ? ' selected' : '')}
       onClick={() => setSelectedISO(iso)}>
-      <div className="lbl">{t(DAYS[d.getDay()])}</div><div className="num">{d.getDate()}</div><div className={'dot' + dot} /></button>)
+      <div className="lbl">{t(DAYS[d.getDay()])}</div><div className="num">{faGlyphs(d.getDate())}</div><div className={'dot' + dot} /></button>)
   }
   const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6)
-  const wkLabel = weekOffset === 0 ? t('This week') : `${weekStart.getDate()} ${weekStart.toLocaleDateString(dateLocale(), { month: 'short' })} – ${weekEnd.getDate()} ${weekEnd.toLocaleDateString(dateLocale(), { month: 'short' })}`
+  const wkLabel = weekOffset === 0 ? t('This week') : faGlyphs(`${weekStart.getDate()} ${weekStart.toLocaleDateString(dateLocale(), { month: 'short' })} – ${weekEnd.getDate()} ${weekEnd.toLocaleDateString(dateLocale(), { month: 'short' })}`)
 
   const currentWeekStart = new Date(today)
   currentWeekStart.setDate(today.getDate() - (S.lang === 'fa' ? (today.getDay() + 1) % 7 : (today.getDay() + 6) % 7))
@@ -167,11 +167,11 @@ export default function Home() {
           <div>
             <div className="row" style={{ gap: 7, fontSize: 22, fontWeight: 600, letterSpacing: '-.021em' }}>
               <Icon name="flame" style={{ color: 'var(--orange)' }} />
-              {t('{0} week streak', streakWeeks(S))}
+              {t('{0} week streak', fmtNum(streakWeeks(S)))}
             </div>
             <div className="muted small" style={{ marginTop: 4, lineHeight: 1.6 }}>
               <div>{weekSummary}</div>
-              <div>{t('Total workouts recorded: {0}', S.workouts.length)}</div>
+              <div>{t('Total workouts recorded: {0}', fmtNum(S.workouts.length))}</div>
             </div>
           </div>
           <Icon name="calendar" className="chev" style={{ fontSize: 20 }} />
