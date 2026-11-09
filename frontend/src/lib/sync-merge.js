@@ -158,7 +158,7 @@ export function mergeDayPlan({ baseDayPlan, local, server }) {
 }
 
 // classification for the custom keys — skipped by the generic three-way loop
-const CUSTOM_KEYS = ['exWeights']                            // merged by its own rule (dayPlan joins in its step)
+const CUSTOM_KEYS = ['exWeights', 'dayPlan']                 // merged by their own rules
 
 // Bodyweight tombstones carry the deletion time ({d, at}) so a later re-log can beat them;
 // phase-2 legacy strings read as "deleted at 0" (older than anything stamped). The map keeps
@@ -250,6 +250,12 @@ export function mergeStates({ baseHashes, baseSnap, local, server }) {
     const lc = hL !== hB, sc = hS !== hB
     if (!lc || !sc) continue
     if (k === 'exWeights') merged.exWeights = mergeExWeights({ local: ln, server: sn, mergedWorkouts: merged.workouts, baseCustomIds: baseSnap?.customIds })
+    else if (k === 'dayPlan') {
+      // without the base snapshot a per-date deletion is indistinguishable from absence —
+      // fall back to the old whole-key conflict rather than guessing
+      if (!baseSnap || !('dayPlan' in baseSnap)) { conflicts.push(k); continue }
+      merged.dayPlan = mergeDayPlan({ baseDayPlan: baseSnap.dayPlan, local: ln.dayPlan, server: sn.dayPlan })
+    }
   }
   return { merged, conflicts, epochConflict: false }
 }
@@ -299,7 +305,7 @@ export async function pushWithMerge(deps, retries = 0) {
     deps.setBase({ rev: resp.rev ?? null, hashes: topLevelHashes(normalizeState(deps.getLocal())) }, deps.getLocal())
     return { ok: true, rev: resp.rev ?? null }
   }
-  const m = mergeStates({ baseHashes: base?.hashes || null, local: deps.getLocal(), server: resp.state })
+  const m = mergeStates({ baseHashes: base?.hashes || null, baseSnap: base?.snap, local: deps.getLocal(), server: resp.state })
   if (m.epochConflict || m.conflicts.length) {
     return { ok: false, conflict: true, conflicts: m.conflicts, epochConflict: m.epochConflict, serverState: resp.state, serverRev: resp.rev, merged: m.merged }
   }

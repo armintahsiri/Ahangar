@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   hashKey, topLevelHashes, normalizeState, mergeStates, resolveMerge,
-  pushWithMerge, mergeExWeights, addTombstone, removeTombstone, withNewEpoch, PUSH_MAX_RETRIES,
+  pushWithMerge, mergeExWeights, mergeDayPlan, addTombstone, removeTombstone, withNewEpoch, PUSH_MAX_RETRIES,
   withSnap, BASE_SNAP_MAX
 } from './sync-merge.js'
 
@@ -215,6 +215,51 @@ describe('mergeExWeights (phase 7b)', () => {
   })
 })
 
+describe('mergeDayPlan per-date (phase 7b)', () => {
+  const B = { '2026-11-01': 'r1' }               // base: one override
+  const run = (l, s, base = B) => mergeDayPlan({ baseDayPlan: base, local: l, server: s })
+
+  it('different dates union without conflict', () => {
+    expect(run({ '2026-11-02': 'r2' }, { '2026-11-03': 'r3' })).toEqual({ '2026-11-02': 'r2', '2026-11-03': 'r3' })
+  })
+  it('same date, same value → one', () => {
+    expect(run({ '2026-11-01': 'r9' }, { '2026-11-01': 'r9' })).toEqual({ '2026-11-01': 'r9' })
+  })
+  it('deletion on one side + untouched other → deleted', () => {
+    expect(run({}, {})).toEqual({})
+    expect(run({ '2026-11-05': 'r5' }, { '2026-11-05': 'r5' })).toEqual({ '2026-11-05': 'r5' })
+  })
+  it('deletion on local + change on server → local deletion wins', () => {
+    expect(run({}, { '2026-11-01': 'rNew' })).toEqual({})
+  })
+  it('change on local + deletion on server → local change wins', () => {
+    expect(run({ '2026-11-01': 'rLocal' }, {})).toEqual({ '2026-11-01': 'rLocal' })
+  })
+  it('both changed, different values → local wins', () => {
+    expect(run({ '2026-11-01': 'rA' }, { '2026-11-01': 'rB' })).toEqual({ '2026-11-01': 'rA' })
+  })
+  it("'rest' behaves like any value", () => {
+    expect(run({ '2026-11-01': 'rest' }, B)).toEqual({ '2026-11-01': 'rest' })
+  })
+  it('inputs are not mutated', () => {
+    const l = { '2026-11-02': 'r2' }, s = { '2026-11-01': 'r1' }
+    run(l, s)
+    expect(l).toEqual({ '2026-11-02': 'r2' })
+    expect(s).toEqual({ '2026-11-01': 'r1' })
+  })
+  it('through mergeStates: both sides changed dayPlan with a snapshot → merged, not conflicted', () => {
+    const baseHashes = { unit: hashKey('kg'), dayPlan: hashKey(B) }
+    const m = mergeStates({ baseHashes, baseSnap: { dayPlan: B, customIds: [] }, local: { unit: 'kg', dayPlan: { '2026-11-02': 'r2' } }, server: { unit: 'kg', dayPlan: { '2026-11-03': 'r3' } } })
+    expect(m.conflicts).toEqual([])
+    expect(m.merged.dayPlan).toEqual({ '2026-11-02': 'r2', '2026-11-03': 'r3' })
+  })
+  it('through mergeStates without a snapshot → old whole-key conflict', () => {
+    const baseHashes = { unit: hashKey('kg'), dayPlan: hashKey(B) }
+    const m = mergeStates({ baseHashes, local: { unit: 'kg', dayPlan: { '2026-11-02': 'r2' } }, server: { unit: 'kg', dayPlan: { '2026-11-03': 'r3' } } })
+    expect(m.conflicts).toEqual(['dayPlan'])
+  })
+})
+
 describe('withSnap — base snapshot (phase 7b)', () => {
   it('attaches dayPlan and custom ids from the accepted state', () => {
     const st = { dayPlan: { '2026-11-09': 'r1' }, customEx: [{ id: 'c1' }, { id: null }] }
@@ -386,6 +431,30 @@ describe('pushWithMerge controller', () => {
     expect(r.failed).toBe(true)
     expect(r.exhausted).toBe(true)
     expect(calls.send.length).toBe(PUSH_MAX_RETRIES + 1)
+  })
+
+  it('two devices, different dayPlan days + both changed exWeights → merges cleanly, no conflict sheet', async () => {
+    const B = { unit: 'kg', dayPlan: {}, exWeights: {} }
+    const base = { rev: 7, hashes: hashesOf(B), snap: { dayPlan: B.dayPlan, customIds: [] } }
+    const local = { ...B, dayPlan: { '2026-11-10': 'rA' }, exWeights: { squat: { w: 120, d: '2026-11-10' } } }
+    const serverState = { rev: 8, unit: 'kg', dayPlan: { '2026-11-11': 'rB' }, exWeights: { bench: { w: 80, d: '2026-11-11' } } }
+    let applied = null
+    const responses = [
+      { ok: false, rev: 8, state: serverState },
+      () => ({ ok: true, rev: 9 })
+    ]
+    let i = 0
+    const deps = {
+      getBase: () => base,
+      getLocal: () => local,
+      applyLocal: m => { applied = m },
+      setBase: () => {},
+      send: async () => { const r = responses[i++]; return typeof r === 'function' ? r() : r }
+    }
+    const r = await (await import('./sync-merge.js')).pushWithMerge(deps)
+    expect(r.ok).toBe(true)
+    expect(applied.dayPlan).toEqual({ '2026-11-10': 'rA', '2026-11-11': 'rB' })
+    expect(applied.exWeights).toEqual({ squat: { w: 120, d: '2026-11-10' }, bench: { w: 80, d: '2026-11-11' } })
   })
 
   it('a thrown send (offline) reports failure', async () => {

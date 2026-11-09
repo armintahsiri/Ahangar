@@ -271,7 +271,7 @@ export const useStore = create((set, get) => {
         }
         // Dirty: instead of the old "local always wins", merge over the pinned base so the
         // other device's work and this device's offline queue both survive.
-        const m = mergeStates({ baseHashes: base.hashes, local: S, server: serverRaw })
+        const m = mergeStates({ baseHashes: base.hashes, baseSnap: base.snap, local: S, server: serverRaw })
         if (m.epochConflict || m.conflicts.length) {
           set({
             sync: nextSync(get().sync, { type: 'conflict' }),
